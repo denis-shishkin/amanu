@@ -6,6 +6,8 @@ license texts are included in every application bundle under
 
 | Component | Version | License |
 |---|---:|---|
+| [LocalVQE](https://github.com/localai-org/LocalVQE) (echo canceller) | f53063c | Apache License 2.0 |
+| [ggml](https://github.com/ggml-org/ggml), distributed with LocalVQE | c044a8e | MIT |
 | [FluidAudio](https://github.com/FluidInference/FluidAudio) | 0.15.5 | Apache License 2.0 |
 | fastcluster, distributed with FluidAudio | bundled | BSD 2-Clause |
 | vbx, distributed with FluidAudio | bundled | Apache License 2.0 |
@@ -15,3 +17,7 @@ license texts are included in every application bundle under
 
 Amanu itself is available under the [MIT license](LICENSE), retaining the
 copyright and license notice of the quill project from which it began.
+
+The LocalVQE build uses a small Amanu macOS packaging patch to produce one
+self-contained Intel dylib instead of runtime-loaded CPU-variant libraries.
+The inference implementation and model are otherwise the pinned upstream work.

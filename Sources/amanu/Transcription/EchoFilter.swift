@@ -18,6 +18,81 @@ import Foundation
 /// `mic_voice_processing` prevents the echo at capture; this pass guards
 /// sessions recorded raw (or where the voice unit fell back).
 enum EchoFilter {
+    /// After acoustic cancellation, only exact sequences of at least five
+    /// words are removable. A mixed echo/local segment survives in full unless
+    /// every word is accounted for. ASR may split that sequence into words.
+    static func dropResidualEchoes(_ segments: [Transcript.Segment]) -> [Transcript.Segment] {
+        struct Token {
+            let text: String
+            let segment: Int
+            let start: Int
+            let end: Int
+        }
+        struct Window {
+            let key: String
+            let start: Int
+            let end: Int
+            let positions: Range<Int>
+        }
+        func windows(_ tokens: [Token]) -> [Window] {
+            guard tokens.count >= 5 else { return [] }
+            return (0...(tokens.count - 5)).compactMap { i in
+                let span = tokens[i..<i+5]
+                guard zip(span, span.dropFirst()).allSatisfy({ $1.start - $0.end <= 400 }) else { return nil }
+                return Window(key: span.map(\.text).joined(separator: "\u{1f}"),
+                              start: span.map(\.start).min()!, end: span.map(\.end).max()!, positions: i..<i+5)
+            }
+        }
+        var bySpeaker: [String: [Token]] = [:]
+        var counts: [Int: Int] = [:]
+        for (index, segment) in segments.enumerated() {
+            let tokens = words(segment.text).map {
+                Token(text: $0, segment: index, start: segment.start_ms, end: segment.end_ms)
+            }
+            counts[index] = tokens.count
+            bySpeaker[segment.speaker, default: []] += tokens
+        }
+        var remote: [String: [Window]] = [:]
+        var longest = 0
+        for (speaker, tokens) in bySpeaker where isSide(speaker, "them") {
+            for window in windows(tokens) {
+                remote[window.key, default: []].append(window)
+                longest = max(longest, window.end - window.start)
+            }
+        }
+        for key in remote.keys { remote[key]!.sort { $0.start < $1.start } }
+        var removable: Set<Int> = []
+        for (speaker, tokens) in bySpeaker where isSide(speaker, "me") {
+            var matched: Set<Int> = []
+            for window in windows(tokens) {
+                guard let candidates = remote[window.key] else { continue }
+                // Bound a repeated phrase's search by time, not meeting length.
+                var lo = 0, hi = candidates.count
+                while lo < hi {
+                    let mid = (lo + hi) / 2
+                    if candidates[mid].start < window.start - longest - 400 { lo = mid + 1 }
+                    else { hi = mid }
+                }
+                var index = lo
+                while index < candidates.count, candidates[index].start <= window.end + 400 {
+                    let other = candidates[index]
+                    let overlap = min(window.end, other.end) - max(window.start, other.start)
+                    let union = max(window.end, other.end) - min(window.start, other.start)
+                    if union > 0 && Double(overlap) / Double(union) >= 0.8 {
+                        matched.formUnion(window.positions)
+                        break
+                    }
+                    index += 1
+                }
+            }
+            var matchedCounts: [Int: Int] = [:]
+            for position in matched { matchedCounts[tokens[position].segment, default: 0] += 1 }
+            for (index, count) in matchedCounts where count == counts[index] && count > 0 {
+                removable.insert(index)
+            }
+        }
+        return segments.enumerated().compactMap { removable.contains($0.offset) ? nil : $0.element }
+    }
     /// How far (ms) beyond a them segment's span a me segment still counts as
     /// overlapping it.
     private static let overlapPadMs = 400

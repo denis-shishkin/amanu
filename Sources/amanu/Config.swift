@@ -243,6 +243,12 @@ enum Config {
         load()?["transcript_echo_filter"] as? Bool ?? true
     }
 
+    /// Clean a derived microphone file before ASR without opening a playback
+    /// device. Originals and the user's live call audio are never processed.
+    static func offlineEchoCancellation() -> Bool {
+        load()?["offline_echo_cancellation"] as? Bool ?? true
+    }
+
     // MARK: - speaker names
 
     /// What to call the person doing the recording, instead of "me".

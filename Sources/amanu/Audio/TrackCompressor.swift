@@ -236,7 +236,7 @@ enum TrackCompressor {
                     AVFormatIDKey: kAudioFormatMPEG4AAC,
                     AVSampleRateKey: rate,
                     AVNumberOfChannelsKey: 2,
-                    AVEncoderBitRateKey: 128_000,
+                    AVEncoderBitRateKey: rate < 32_000 ? 64_000 : 128_000,
                 ],
                 commonFormat: .pcmFormatFloat32,
                 interleaved: false

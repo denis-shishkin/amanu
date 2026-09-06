@@ -123,15 +123,17 @@ struct RetranscriptionTests {
         nonisolated let input: TranscriptionInput = .multichannel
 
         private(set) var heardChannels: AVAudioChannelCount = 0
+        private(set) var heardURL: URL?
 
         func prepare() async throws {}
         func release() async {}
 
         func transcribe(_ audio: URL) async throws -> [TranscriptSegment] {
             heardChannels = try AVAudioFile(forReading: audio).processingFormat.channelCount
+            heardURL = audio
             return [
-                .init(start: 0, end: 1, text: "the remote sentence", speaker: "2A"),
-                .init(start: 0.05, end: 1.05, text: "the remote sentence", speaker: "1A"),
+                .init(start: 0, end: 1, text: "the remote sentence contains seven distinct words", speaker: "2A"),
+                .init(start: 0.05, end: 1.05, text: "the remote sentence contains seven distinct words", speaker: "1A"),
                 .init(start: 1.2, end: 2, text: "the local answer", speaker: "1B"),
             ]
         }
@@ -210,16 +212,22 @@ struct RetranscriptionTests {
         try await TranscriptionCoordinator(engine: engine, onStop: { nil }).transcribeNow(dir)
 
         #expect(await engine.heardChannels == 2)
+        let heardURL = try #require(await engine.heardURL)
+        #expect(heardURL.deletingLastPathComponent() != dir)
+        #expect(!FileManager.default.fileExists(atPath: heardURL.path))
         let transcript = try #require(PostProcessor.readTranscript(dir))
         #expect(transcript.segments.map(\.speaker) == ["them", "me"])
         #expect(transcript.segments.map(\.text) == [
-            "the remote sentence", "the local answer",
+            "the remote sentence contains seven distinct words", "the local answer",
         ])
         let meta = try #require(SessionState.read(dir))
         #expect(meta["transcription_input"] as? String == "multichannel")
         let echo = try #require(meta["echo_filter"] as? [String: Any])
         #expect(echo["ran"] as? Bool == true)
         #expect(echo["dropped_segments"] as? Int == 1)
+        #expect(echo["mode"] as? String == "residual_exact_phrases")
+        let audioEcho = try #require(meta["audio_echo_cancellation"] as? [String: Any])
+        #expect(audioEcho["sample_rate"] as? Int == 16000)
     }
 
     @Test("A settled session is transcribed back out of its stereo archive")

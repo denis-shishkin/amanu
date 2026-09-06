@@ -30,7 +30,7 @@ BUILT = .build/apple/Products/Release/amanu
 # nothing here.
 APP        = .build/Amanu.app
 APP_NAME   = Amanu
-VERSION   ?= 0.4.16
+VERSION   ?= 0.4.17
 # A build number that only ever goes up, and says which commit it was.
 BUILD     ?= $(shell git rev-list --count HEAD 2>/dev/null || echo 1)
 ICON       = Resources/Amanu.icns
@@ -47,6 +47,9 @@ DMG        = $(DIST)/amanu-v$(VERSION)-macos-universal.dmg
 # fine here and only fail to launch on the Macs this build exists for.
 SPARKLE_FW = $(shell find .build/artifacts/sparkle -type d -name Sparkle.framework \
 	-path '*macos-arm64_x86_64*' 2>/dev/null | head -1)
+LOCALVQE_ROOT = .build/localvqe
+LOCALVQE_LIB = $(LOCALVQE_ROOT)/lib/liblocalvqe.dylib
+LOCALVQE_MODEL = $(LOCALVQE_ROOT)/model/localvqe-v1.4-aec-200K-f32.gguf
 
 # Prefer Developer ID (distributable, long-lived) over Apple Development
 # (fine for a machine-local tool). Falls back to ad-hoc so a clean checkout on
@@ -61,11 +64,17 @@ ifeq ($(strip $(SIGN_ID)),)
 SIGN_ID := -
 endif
 
-.PHONY: all build app icon run-app identities verify clean release release-dry
+.PHONY: all build localvqe verify-localvqe app icon run-app identities verify clean release release-dry
 
 all: app
 
-build:
+localvqe:
+	@scripts/build-localvqe.sh
+
+verify-localvqe: localvqe
+	@scripts/verify-localvqe.py
+
+build: localvqe
 	swift build -c release --arch arm64 --arch x86_64
 
 # Drawn from the same feather the menu bar uses, so the Dock, the window and
@@ -78,8 +87,11 @@ $(ICON):
 
 app: build $(ICON)
 	@rm -rf $(APP)
-	@mkdir -p $(APP)/Contents/MacOS $(APP)/Contents/Resources
+	@mkdir -p $(APP)/Contents/MacOS $(APP)/Contents/Resources/Models $(APP)/Contents/Frameworks
 	@cp $(BUILT) $(APP)/Contents/MacOS/$(APP_NAME)
+	@cp $(LOCALVQE_LIB) $(APP)/Contents/Frameworks/liblocalvqe.dylib
+	@cp $(LOCALVQE_MODEL) $(APP)/Contents/Resources/Models/
+	@cp $(LOCALVQE_ROOT)/verification.json $(APP)/Contents/Resources/LocalVQE-verification.json
 	@sed -e 's/__SHORT_VERSION__/$(VERSION)/' -e 's/__BUILD_VERSION__/$(BUILD)/' \
 		Packaging/Amanu-Info.plist > $(APP)/Contents/Info.plist
 	@printf 'APPL????' > $(APP)/Contents/PkgInfo
@@ -87,6 +99,8 @@ app: build $(ICON)
 	@mkdir -p $(APP)/Contents/Resources/Licenses
 	@cp LICENSE $(APP)/Contents/Resources/LICENSE
 	@cp THIRD-PARTY-NOTICES.md $(APP)/Contents/Resources/
+	@cp $(LOCALVQE_ROOT)/licenses/LocalVQE-LICENSE $(APP)/Contents/Resources/Licenses/
+	@cp $(LOCALVQE_ROOT)/licenses/ggml-LICENSE $(APP)/Contents/Resources/Licenses/
 	@cp .build/checkouts/FluidAudio/LICENSE \
 		$(APP)/Contents/Resources/Licenses/FluidAudio-LICENSE
 	@cp .build/checkouts/FluidAudio/ThirdPartyLicenses/fastcluster-LICENSE.md \
@@ -101,9 +115,10 @@ app: build $(ICON)
 		$(APP)/Contents/Resources/Licenses/Sparkle-ed25519-LICENSE.txt
 	@test -s $(APP)/Contents/Resources/LICENSE \
 		&& test -s $(APP)/Contents/Resources/THIRD-PARTY-NOTICES.md \
-		&& test "$$(find $(APP)/Contents/Resources/Licenses -type f | wc -l | tr -d ' ')" = 6
+		&& test -s $(APP)/Contents/Resources/Models/localvqe-v1.4-aec-200K-f32.gguf \
+		&& test -s $(APP)/Contents/Resources/LocalVQE-verification.json \
+		&& test "$$(find $(APP)/Contents/Resources/Licenses -type f | wc -l | tr -d ' ')" = 8
 	@test -n "$(SPARKLE_FW)" || (echo "Sparkle.framework not found — run swift build first"; exit 1)
-	@mkdir -p $(APP)/Contents/Frameworks
 	@cp -R "$(SPARKLE_FW)" $(APP)/Contents/Frameworks/
 	@# Sparkle's XPC services exist so a sandboxed app can still download and
 	@# install; amanu is not sandboxed, so they are two more binaries to sign,
@@ -116,6 +131,7 @@ app: build $(ICON)
 	@# the app that contains it invalidates the app's own seal — and the failure
 	@# shows up as a Gatekeeper rejection on someone else's Mac, not here.
 	@for nested in \
+		$(APP)/Contents/Frameworks/liblocalvqe.dylib \
 		$(APP)/Contents/Frameworks/Sparkle.framework/Versions/B/Autoupdate \
 		$(APP)/Contents/Frameworks/Sparkle.framework/Versions/B/Updater.app \
 		$(APP)/Contents/Frameworks/Sparkle.framework ; do \
@@ -139,6 +155,9 @@ app: build $(ICON)
 	@lipo -archs $(APP)/Contents/MacOS/$(APP_NAME) | grep -q x86_64 \
 		&& lipo -archs $(APP)/Contents/MacOS/$(APP_NAME) | grep -q arm64 \
 		|| (echo "not universal: $$(lipo -archs $(APP)/Contents/MacOS/$(APP_NAME))"; exit 1)
+	@lipo -archs $(APP)/Contents/Frameworks/liblocalvqe.dylib | grep -q x86_64 \
+		&& lipo -archs $(APP)/Contents/Frameworks/liblocalvqe.dylib | grep -q arm64 \
+		|| (echo "LocalVQE not universal: $$(lipo -archs $(APP)/Contents/Frameworks/liblocalvqe.dylib)"; exit 1)
 	@echo "built → $(APP) ($(VERSION) build $(BUILD)) · $$(lipo -archs $(APP)/Contents/MacOS/$(APP_NAME))"
 
 # Launch the way a person would: through LaunchServices, so the app is its own

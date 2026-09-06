@@ -1,3 +1,4 @@
+import AVFoundation
 import Foundation
 
 /// AssemblyAI, with speaker diarization, over aligned two-channel audio.
@@ -91,6 +92,7 @@ actor AssemblyAIEngine: TranscriptionEngine {
     func release() async {}
 
     func transcribe(_ audio: URL) async throws -> [TranscriptSegment] {
+        let audioDuration = try await Self.audioDuration(of: audio)
         let cache = Self.cacheURL(for: audio)
 
         let response: TranscriptResponse
@@ -115,18 +117,47 @@ actor AssemblyAIEngine: TranscriptionEngine {
             guard !text.isEmpty else { throw EngineError.empty }
             return [TranscriptSegment(
                 start: 0,
-                end: response.audio_duration ?? 0,
+                end: audioDuration,
                 text: text
             )]
         }
-        return utterances.map {
+        return Self.boundedSegments(utterances.map {
             TranscriptSegment(
                 start: TimeInterval($0.start) / 1000,
                 end: TimeInterval($0.end) / 1000,
                 text: $0.text,
                 speaker: $0.speaker
             )
+        }, duration: audioDuration)
+    }
+
+    /// Provider timestamps are untrusted data. AssemblyAI has returned an
+    /// utterance almost thirty seconds beyond a real 35-second file, and that
+    /// text otherwise becomes a plausible-looking part of the transcript.
+    static func boundedSegments(
+        _ segments: [TranscriptSegment],
+        duration: TimeInterval
+    ) -> [TranscriptSegment] {
+        guard duration.isFinite, duration > 0 else { return [] }
+        return segments.compactMap { segment in
+            guard segment.start.isFinite, segment.end.isFinite else { return nil }
+            let start = max(0, segment.start)
+            let end = min(duration, segment.end)
+            guard start < duration, end > start else { return nil }
+            return TranscriptSegment(
+                start: start,
+                end: end,
+                text: segment.text,
+                speaker: segment.speaker)
         }
+    }
+
+    private static func audioDuration(of audio: URL) async throws -> TimeInterval {
+        let duration = try await AVURLAsset(url: audio).load(.duration).seconds
+        guard duration.isFinite, duration > 0 else {
+            throw CocoaError(.fileReadCorruptFile, userInfo: [NSFilePathErrorKey: audio.path])
+        }
+        return duration
     }
 
     static func cacheURL(for audio: URL) -> URL {

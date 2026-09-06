@@ -224,6 +224,12 @@ enum SettingsSchema {
                       "Для встреч через колонки, чтобы дальняя сторона не попадала ещё и на вашу "
                           + "дорожку. Пока работает, приглушает остальной звук; в наушниках бесполезно."),
                   .toggle, default: false),
+            Entry(["offline_echo_cancellation"],
+                  localised("Remove echo before transcription", "Убирать эхо перед расшифровкой"),
+                  localised(
+                      "After recording, cleans a copy of the microphone track using the other side's audio. Does not change what you hear during the call or the saved original audio.",
+                      "После записи очищает копию микрофонной дорожки по звуку собеседника. Не меняет звук во время звонка и сохранённое исходное аудио."),
+                  .toggle, default: true),
             Entry(["keep_audio"],
                   localised("Keep the audio after transcribing", "Оставлять звук после расшифровки"),
                   localised(

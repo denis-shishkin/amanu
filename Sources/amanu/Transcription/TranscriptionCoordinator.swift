@@ -335,15 +335,50 @@ actor TranscriptionCoordinator {
         try SessionClaim.acquire(dir, stage: .transcribe)
         defer { SessionClaim.release(dir) }
 
-        let meta = try SessionMeta.read(from: dir)
+        var meta = try SessionMeta.read(from: dir)
         let engine = try await preparedEngine()
+
+        var audioDirectory = dir
+        var cleaned: OfflineEchoAudio.Result?
+        defer { cleaned?.removeAudio() }
+        if Config.offlineEchoCancellation(),
+           let mic = meta.track(for: "me"), let system = meta.track(for: "them") {
+            let microphone = OfflineEchoAudio.Source(
+                url: dir.appendingPathComponent(mic.file), channel: mic.channel ?? 0, offsetMs: mic.offsetMs)
+            let reference = OfflineEchoAudio.Source(
+                url: dir.appendingPathComponent(system.file), channel: system.channel ?? 0, offsetMs: system.offsetMs)
+            log(dir, "removing acoustic echo from a microphone copy before transcription")
+            let worker = Task.detached(priority: .utility) {
+                try OfflineEchoAudio.prepare(microphone: microphone, system: reference, in: dir)
+            }
+            let prepared = try await withTaskCancellationHandler {
+                try await worker.value
+            } onCancel: { worker.cancel() }
+            cleaned = prepared
+            try Task.checkCancellation()
+            audioDirectory = prepared.directory
+            meta = SessionMeta(tracks: [
+                .init(file: "mic.caf", speaker: "me", offsetMs: 0, channel: nil),
+                .init(file: "system.caf", speaker: "them", offsetMs: 0, channel: nil),
+            ], title: meta.title, attendees: meta.attendees, app: meta.app)
+            SessionState.update(dir, with: ["audio_echo_cancellation": [
+                "processor": LocalVQEAssets.processorVersion,
+                "model_sha256": LocalVQEAssets.modelSHA256,
+                "sample_rate": EchoCanceller.sampleRate,
+                "frames": prepared.frames,
+                "cache_directory": prepared.directory.lastPathComponent,
+            ]])
+            log(dir, "audio echo cancellation complete; original tracks kept")
+        } else {
+            SessionState.update(dir, with: ["audio_echo_cancellation": nil])
+        }
 
         var merged: [Transcript.Segment]
         var echoFilterRan = false
         var echoesDropped = 0
         switch engine.input {
         case .perTrack:
-            merged = try await transcribePerTrack(dir, meta: meta, engine: engine)
+            merged = try await transcribePerTrack(audioDirectory, meta: meta, engine: engine)
             merged.sort { $0.start_ms < $1.start_ms }
             // Only the per-track path can double-transcribe the far end: it
             // reads both tracks, and a raw mic recording through speakers has
@@ -352,7 +387,7 @@ actor TranscriptionCoordinator {
             if Config.transcriptEchoFilter() {
                 echoFilterRan = true
                 let before = merged.count
-                merged = EchoFilter.dropEchoes(merged)
+                merged = cleaned == nil ? EchoFilter.dropEchoes(merged) : EchoFilter.dropResidualEchoes(merged)
                 echoesDropped = before - merged.count
                 if merged.count != before {
                     log(dir, "echo filter dropped \(before - merged.count) "
@@ -360,12 +395,12 @@ actor TranscriptionCoordinator {
                 }
             }
         case .multichannel:
-            merged = try await transcribeMultichannel(dir, meta: meta, engine: engine)
+            merged = try await transcribeMultichannel(audioDirectory, meta: meta, engine: engine)
             merged.sort { $0.start_ms < $1.start_ms }
             if Config.transcriptEchoFilter() {
                 echoFilterRan = true
                 let before = merged.count
-                merged = EchoFilter.dropEchoes(merged)
+                merged = cleaned == nil ? EchoFilter.dropEchoes(merged) : EchoFilter.dropResidualEchoes(merged)
                 echoesDropped = before - merged.count
                 if echoesDropped > 0 {
                     log(dir, "echo filter dropped \(echoesDropped) "
@@ -374,7 +409,7 @@ actor TranscriptionCoordinator {
             }
             merged = MultichannelSpeakerLabels.collapseSingleSides(merged)
         case .mixed:
-            merged = try await transcribeMixed(dir, meta: meta, engine: engine)
+            merged = try await transcribeMixed(audioDirectory, meta: meta, engine: engine)
             merged.sort { $0.start_ms < $1.start_ms }
         }
 
@@ -394,6 +429,7 @@ actor TranscriptionCoordinator {
             "echo_filter": [
                 "ran": echoFilterRan,
                 "dropped_segments": echoesDropped,
+                "mode": cleaned == nil ? "raw_audio" : "residual_exact_phrases",
             ],
         ])
         log(dir, "done — \(merged.count) segments")

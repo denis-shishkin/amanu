@@ -10,6 +10,22 @@ import Testing
 /// three uploads of the same audio to a paid API for an answer that will not
 /// change.
 struct AssemblyAIEngineTests {
+    /// AssemblyAI returned the second utterance below for a 35-second clip.
+    /// Keeping it produces transcript text almost thirty seconds after the
+    /// recording ended; dropping the first would lose a real boundary phrase.
+    @Test("Provider timestamps are clipped to the audio and impossible utterances are discarded")
+    func timestampsStayInsideAudio() {
+        let bounded = AssemblyAIEngine.boundedSegments([
+            .init(start: 33.967, end: 36.967, text: "near boundary", speaker: "2A"),
+            .init(start: 63.867, end: 64.047, text: "outside", speaker: "2A"),
+            .init(start: -0.2, end: 0.4, text: "early", speaker: "1A"),
+        ], duration: 35)
+
+        #expect(bounded.map(\.text) == ["near boundary", "early"])
+        #expect(bounded.map(\.start) == [33.967, 0])
+        #expect(bounded.map(\.end) == [35, 0.4])
+    }
+
     @Test("AssemblyAI channel labels become Amanu sides")
     func channelLabelsBecomeSides() {
         let mapped = MultichannelSpeakerLabels.map([

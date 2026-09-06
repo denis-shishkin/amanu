@@ -38,7 +38,7 @@ diagnosis later.
 | Notarization key | `~/.appstoreconnect/private_keys/AuthKey_$ASC_KEY_ID.p8` | Same key the iOS projects use. |
 | ASC ids | `.env.asc` in the repo root, gitignored | Copy one from any iOS project; they are all the same account. |
 | Developer ID certificate | `~/Library/Keychains/developer-id.keychain-db` | `~/.local/bin/unlock-signing-keychain`; `make app` runs it already. |
-| Node.js and Python 3 | local executable PATH | required by release-script and landing behavioral tests |
+| Node.js, Python 3 and CMake | local executable PATH | required by release tests and the pinned LocalVQE universal build |
 | `gh`, authenticated | account `gsamat` | `gh auth status` |
 | `ssh reina` | passwordless | this is where amanu.me and the compatibility feed are served from |
 | Legacy site checkout | `~/Documents/проекты/samatme3`, on `main`, pushed | keeps the old feed durable across samat.me deploys |
@@ -73,8 +73,9 @@ The script runs eight stages and stops at the first failure. That ordering is
 the whole design: **nothing is public until stage 8**, so a failure anywhere
 before it costs time and nothing else. Do not "helpfully" reorder them.
 
-1. **Tests.** `swift test`. Fix the tests.
-2. **Build and sign.** `make app`. The build is universal — `swift build
+1. **Tests.** Build and verify LocalVQE, then run `swift test`. Fix the tests.
+2. **Build and sign.** `make app`. Both Amanu and its LocalVQE dylib are
+   universal. The Swift build uses `swift build
    --arch arm64 --arch x86_64`, which also moves the product to
    `.build/apple/Products/Release/amanu` — and the target refuses to finish if
    either slice is missing, because a single-architecture disk image looks
@@ -156,6 +157,7 @@ the app's own seal is invalid — but `codesign --verify` on this machine may
 still pass, and the failure surfaces as a Gatekeeper rejection on somebody
 else's Mac. `make app` signs innermost first:
 
+    liblocalvqe.dylib
     Sparkle.framework/Versions/B/Autoupdate
     Sparkle.framework/Versions/B/Updater.app
     Sparkle.framework

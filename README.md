@@ -107,8 +107,10 @@ from an idealized recording pipeline.
   from by loudness alone.
 - **Recording must not change the meeting.** Apple's duplex voice-processing
   route can attenuate or interrupt playback merely because recording started.
-  Amanu therefore captures the microphone raw by default and removes proven
-  acoustic echo during transcript processing, where it cannot affect the call.
+  Amanu therefore captures the microphone raw by default. After recording,
+  LocalVQE removes acoustic echo from a microphone copy before recognition.
+  A conservative text pass removes remaining exact phrase duplicates. None of
+  this processing affects live playback or the saved source audio.
 - **Capture is crash-recoverable.** The live tracks are uncompressed PCM in
   CAF containers and are compressed only after the transcript exists. A hard
   kill can leave an unfinished AAC file unreadable; PCM preserves everything
@@ -158,7 +160,9 @@ will not install one during a recording.
 ## Build from source
 
 Amanu is one Swift 6 package. SwiftPM builds the executable; `make app`
-assembles and signs the application bundle without an Xcode project.
+builds the pinned LocalVQE native assets, then assembles and signs the
+application bundle without an Xcode project. Building from source requires
+CMake as well as Xcode's command-line tools.
 
 ```sh
 git clone https://github.com/gsamat/amanu.git
@@ -251,6 +255,16 @@ only values that differ from the defaults. A compact example:
 - `summary.*` covers `enabled`, `backend`, `language`, `model`,
   `openai_model`, `ollama_model`, `api_key_path`, and `openai_api_key_path`.
 - `mic_voice_processing` enables Apple's capture-time voice processing;
+  `offline_echo_cancellation` (on by default) instead cleans a copy of the mic
+  after recording, using system audio as the playback reference. It never
+  opens a playback device or changes the archived source audio. Transcription
+  uses a separate cache for cleaned audio; the first re-transcription of an
+  older recording therefore needs a new provider request. Reference silence
+  before playback and after a one-second acoustic-tail holdoff keeps the
+  original microphone samples exactly. If playback occurs later, the model
+  still consumes leading silence from the start so its delay-estimation clock
+  remains aligned with the recording; an entirely silent reference is detected
+  first and skips the model;
   `transcript_echo_filter` removes proven duplicate far-end speech later;
   `system_audio` is `app` or `all`; `calendar` controls meeting context; and
   `user_name` replaces “me” in named transcripts.
