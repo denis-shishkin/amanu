@@ -166,5 +166,16 @@ identifier links, and orphaned sessions once they are a year old.
 Engine, backend and recovered trigger values are checked against a fixed
 vocabulary before storage and again before sending an older queued event.
 Unknown values become `custom`; arbitrary configuration strings stay local.
-HTTP 408 and 429 responses retain the batch for a later attempt. Turning off
-reporting clears pending events; a request already sent cannot be recalled.
+Delivery uses integer Unix timestamps, including for events queued by older
+versions. Requests contain at most five hundred wire entries (each event has
+an identity entry and an event entry). HTTP success alone is not delivery:
+the sender validates Umami's per-entry receipt and persists partial
+acknowledgements, retrying only entries that have not been acknowledged.
+HTTP errors, malformed receipts and rejected entries remain queued within
+the same seven-day/five-hundred-event limits. Turning off reporting clears
+pending events; a request already sent cannot be recalled.
+
+Before 0.4.18, fractional timestamps were rejected by Umami while its batch
+endpoint returned HTTP 200. Those rejected events were incorrectly removed
+from the local queue. Already discarded history cannot be recovered; queued
+events that still exist are normalized and retried after upgrading.
