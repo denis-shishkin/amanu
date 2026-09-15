@@ -381,3 +381,13 @@ selected the existing system agent successfully. For the release script, pass
 that option through both `GIT_SSH_COMMAND` and `RSYNC_RSH`. Do not rewrite global
 SSH settings, replace keys, or rebuild an already published release to resume
 the remaining push and deployment steps.
+
+## Git diff abbreviations are not stable source fingerprints
+
+The 0.4.17 publication check failed in a fresh ggml clone even though every
+patched source byte matched the previously built release. Git chose eight
+hex digits for object IDs instead of seven as the upstream object database
+grew. Hash approved diffs with `--binary --full-index`; the expected digests
+must use that same representation. Do not accept a newly observed digest
+without comparing the actual source changes. The regression test varies
+`core.abbrev` and still requires unrelated staged and unstaged edits to fail.

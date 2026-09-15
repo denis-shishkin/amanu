@@ -29,7 +29,7 @@ def commit(repository: Path, message: str) -> None:
 
 def diff_hash(repository: Path, *pathspecs: str) -> str:
     result = git(
-        repository, "diff", "--binary", "HEAD", "--", *pathspecs,
+        repository, "diff", "--binary", "--full-index", "HEAD", "--", *pathspecs,
         capture=True,
     )
     return hashlib.sha256(result.stdout).hexdigest()
@@ -66,6 +66,15 @@ class LocalVQESourceGuardTests(unittest.TestCase):
 
             accepted = subprocess.run(arguments, capture_output=True, text=True)
             self.assertEqual(accepted.returncode, 0, accepted.stderr)
+
+            # Clone size and user configuration can change Git's default
+            # abbreviation length without changing a single source byte.
+            for abbreviation in (7, 8, 12):
+                with self.subTest(abbreviation=abbreviation):
+                    git(source, "config", "core.abbrev", str(abbreviation))
+                    git(ggml, "config", "core.abbrev", str(abbreviation))
+                    accepted = subprocess.run(arguments, capture_output=True, text=True)
+                    self.assertEqual(accepted.returncode, 0, accepted.stderr)
 
             git(ggml, "restore", "approved.cpp")
             unpatched = subprocess.run(
