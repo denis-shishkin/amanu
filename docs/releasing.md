@@ -81,7 +81,9 @@ before it costs time and nothing else. Do not "helpfully" reorder them.
    because Xcode versions use different paths) — and the target refuses to finish if
    either slice is missing, because a single-architecture disk image looks
    perfectly fine until someone on the other kind of Mac opens it. Test the
-   Intel slice on an Apple Silicon Mac with `arch -x86_64
+   The bundle is also checked so neither its metadata nor any embedded Mach-O
+   requires a newer system than the declared macOS 14.2 floor. Test the Intel
+   slice on an Apple Silicon Mac with `arch -x86_64
    .build/Amanu.app/Contents/MacOS/Amanu doctor`: Rosetta runs it, and doctor
    is where the platform difference shows up.
    If codesign fails with

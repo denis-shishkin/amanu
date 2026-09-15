@@ -585,7 +585,7 @@ final class AppController {
         guard !automaticFeaturesStarted else { return }
         automaticFeaturesStarted = true
 
-        Task { [transcription, root] in
+        Task { [transcription, root, self] in
             await transcription.setStatusHandler { status in
                 Task { @MainActor [weak self] in
                     self?.showTranscription(status)

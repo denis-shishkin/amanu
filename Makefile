@@ -19,7 +19,7 @@
 #   make SIGN_ID="Developer ID Application: ..."
 
 # Universal: one binary with an arm64 and an x86_64 slice, so the same release
-# runs on Apple Silicon and on the Intel Macs still taking macOS 15. Two
+# runs on Apple Silicon and Intel Macs. Two
 # --arch flags select a multi-arch directory. Ask SwiftPM for its path:
 # Xcode 27's Swift Build engine uses .build/out instead of .build/apple.
 BUILT = $(shell swift build -c release --arch arm64 --arch x86_64 --show-bin-path)/amanu
@@ -30,7 +30,8 @@ BUILT = $(shell swift build -c release --arch arm64 --arch x86_64 --show-bin-pat
 # nothing here.
 APP        = .build/Amanu.app
 APP_NAME   = Amanu
-VERSION   ?= 0.4.19
+VERSION   ?= 0.4.20
+MINIMUM_MACOS ?= 14.2
 # A build number that only ever goes up, and says which commit it was.
 BUILD     ?= $(shell git rev-list --count HEAD 2>/dev/null || echo 1)
 ICON       = Resources/Amanu.icns
@@ -69,7 +70,7 @@ endif
 all: app
 
 localvqe:
-	@scripts/build-localvqe.sh
+	@AMANU_MINIMUM_MACOS=$(MINIMUM_MACOS) scripts/build-localvqe.sh
 
 verify-localvqe: localvqe
 	@scripts/verify-localvqe.py
@@ -158,6 +159,7 @@ app: build $(ICON)
 	@lipo -archs $(APP)/Contents/Frameworks/liblocalvqe.dylib | grep -q x86_64 \
 		&& lipo -archs $(APP)/Contents/Frameworks/liblocalvqe.dylib | grep -q arm64 \
 		|| (echo "LocalVQE not universal: $$(lipo -archs $(APP)/Contents/Frameworks/liblocalvqe.dylib)"; exit 1)
+	@python3 scripts/verify-macos-compatibility.py $(APP) $(MINIMUM_MACOS)
 	@echo "built → $(APP) ($(VERSION) build $(BUILD)) · $$(lipo -archs $(APP)/Contents/MacOS/$(APP_NAME))"
 
 # Launch the way a person would: through LaunchServices, so the app is its own

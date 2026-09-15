@@ -109,7 +109,7 @@ final class SystemAudioRecorder {
     }
 
     private var file: AVAudioFile? {
-        get { state.withLock { $0.file } }
+        get { state.withLockUnchecked { $0.file } }
         set { state.withLock { $0.file = newValue } }
     }
 

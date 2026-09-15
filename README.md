@@ -146,7 +146,7 @@ should be transcribed and summarized.
 
 Requirements:
 
-- macOS 15 or later.
+- macOS 14.2 or later.
 - Apple Silicon for local transcription and the live transcript.
 - The distributed app is universal (`arm64` and `x86_64`). On Intel, recording
   and cloud transcription paths are available, but the app has not yet been

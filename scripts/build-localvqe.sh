@@ -15,6 +15,7 @@ GGML_REV="c044a8eeae2591faa0950c8b5e514cbc4bbfc4ca"
 # SHA-256 of approved diffs with full object IDs (not Git's variable abbreviations).
 MACOS_PATCH_SHA="0e8dc01c74faa8a014f2782546d6b58631abecc32b747cc10efa7b6121cfd3cf"
 GGML_GRU_PATCH_SHA="4d8b39b91707d984f6ba6a529b821effe4844730a6f0571f42a21c5b0c5b11c7"
+MINIMUM_MACOS=${AMANU_MINIMUM_MACOS:-14.2}
 if [ -n "${AMANU_CMAKE:-}" ]; then
     CMAKE=$AMANU_CMAKE
 elif command -v cmake >/dev/null; then
@@ -73,7 +74,7 @@ for ARCH in arm64 x86_64; do
     "$CMAKE" -S "$SOURCE/ggml" -B "$BUILD" \
         -DCMAKE_BUILD_TYPE=Release \
         -DCMAKE_OSX_ARCHITECTURES="$ARCH" \
-        -DCMAKE_OSX_DEPLOYMENT_TARGET=15.0 \
+        -DCMAKE_OSX_DEPLOYMENT_TARGET="$MINIMUM_MACOS" \
         -DCMAKE_SYSTEM_PROCESSOR="$ARCH" \
         -DLOCALVQE_BUILD_SHARED=ON \
         -DGGML_METAL=OFF \

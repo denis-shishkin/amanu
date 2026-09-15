@@ -21,7 +21,7 @@
     <key>CFBundleVersion</key>
     <string>__BUILD_VERSION__</string>
     <key>LSMinimumSystemVersion</key>
-    <string>15.0</string>
+    <string>14.2</string>
     <!-- A Dock icon and a menu bar item, not an accessory: the app switches
          to .accessory at runtime when someone turns the Dock icon off. -->
     <key>LSUIElement</key>

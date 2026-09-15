@@ -1,7 +1,7 @@
 /// What this slice of the binary can do.
 ///
 /// amanu ships as one universal binary, so the same release runs on Apple
-/// Silicon and on the Intel Macs still taking macOS 15. The local speech
+/// Silicon and on Intel Macs. The local speech
 /// models are the one thing that does not cross over: they are Core ML
 /// packages compiled for the Neural Engine, and FluidAudio refuses them
 /// outright on x86_64 rather than falling back to the CPU — which is the

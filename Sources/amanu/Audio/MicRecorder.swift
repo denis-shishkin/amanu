@@ -147,7 +147,7 @@ final class MicRecorder: @unchecked Sendable {
     private let state = OSAllocatedUnfairLock(initialState: LockedState())
 
     private var file: AVAudioFile? {
-        get { state.withLock { $0.file } }
+        get { state.withLockUnchecked { $0.file } }
         set { state.withLock { $0.file = newValue } }
     }
 

@@ -32,6 +32,7 @@ DRY_RUN=0
 # the first release attempt tried to publish into somebody else's repository.
 REPO="gsamat/amanu"
 VERSION=$(sed -n 's/^VERSION *?= *//p' Makefile)
+MINIMUM_MACOS=$(sed -n 's/^MINIMUM_MACOS *?= *//p' Makefile)
 BUILD=$(git rev-list --count HEAD)
 TAG="v$VERSION"
 DMG="dist/amanu-$TAG-macos-universal.dmg"
@@ -86,6 +87,7 @@ swift test --no-parallel 2>&1 | tail -3
 
 step "2/8  building and signing $VERSION (build $BUILD)"
 make app
+python3 scripts/verify-macos-compatibility.py .build/Amanu.app "$MINIMUM_MACOS"
 SPARKLE_BIN=$(find .build/artifacts/sparkle -type d -name bin -print -quit)
 [ -x "$SPARKLE_BIN/sign_update" ] || die "Sparkle sign_update is missing after the build"
 test -s .build/Amanu.app/Contents/Resources/LICENSE \
@@ -184,7 +186,7 @@ cat > "$APPCAST" <<XML
         <item>
             <title>$VERSION</title>
             <pubDate>$PUBDATE</pubDate>
-            <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
+            <sparkle:minimumSystemVersion>$MINIMUM_MACOS</sparkle:minimumSystemVersion>
             <description><![CDATA[$NOTES_HTML]]></description>
             <enclosure
                 url="$ASSET_URL"
