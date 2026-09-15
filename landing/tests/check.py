@@ -239,8 +239,13 @@ def main():
     )
     check(
         "RU: подпись к статусу без «уже»",
-        "<figcaption>Встреча идёт — Amanu пишет.</figcaption>" in ru_html
+        "<figcaption>Встреча идёт — Amanu пишет</figcaption>" in ru_html
         and "Amanu уже пишет" not in ru_html,
+    )
+    check(
+        "RU: фраза об автоматической записи без точки",
+        '<p class="statement">Запускает и&nbsp;останавливает запись автоматически</p>'
+        in ru_html,
     )
     check(
         "RU: модели должны работать по-полной",
@@ -359,7 +364,7 @@ def main():
     )
     check(
         "RU: акцент в заголовке — «Автоматом»",
-        bool(ru_accent) and "Автоматом" in ru_accent.group(1),
+        bool(ru_accent) and ru_accent.group(1).strip() == "Автоматом",
     )
 
     expected_en_shots = {
