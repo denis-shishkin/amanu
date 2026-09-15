@@ -119,7 +119,9 @@ final class SetupForm: NSObject, NSTextFieldDelegate {
     /// The provider in force, read back from the config on every refresh.
     private var provider = "assemblyai"
     private let localSwitch = NSSwitch()
-    private let localEnginePicker = NSPopUpButton()
+    private let localEngineCards = ChoiceGroup()
+    private var localDownloadButtons: [String: NSButton] = [:]
+    private var localDownloadErrors: [String: String] = [:]
 
     private let language = NSPopUpButton()
     private let languageNote = NSTextField(labelWithString: "")
@@ -303,28 +305,32 @@ final class SetupForm: NSObject, NSTextFieldDelegate {
 
         localSwitch.target = self
         localSwitch.action = #selector(localToggled)
-        localEnginePicker.identifier = NSUserInterfaceItemIdentifier("transcription.local_engine")
-        for (title, id, enabled) in [
-            (localised(
-                "Parakeet · ~\(Self.parakeetMegabytes) MB",
-                "Parakeet · ~\(Self.parakeetMegabytes) МБ"), "parakeet", true),
-            (localised(
-                "Whisper large-v3-turbo · ~550 MB",
-                "Whisper large-v3-turbo · ~550 МБ"), "whisper", true),
-            (localised(
-                "GigaAM v3 · ~260 MB · Russian",
-                "GigaAM v3 · ~260 МБ · Русский"), "gigaam", true),
-        ] {
-            localEnginePicker.addItem(withTitle: title)
-            localEnginePicker.lastItem?.representedObject = id
-            localEnginePicker.lastItem?.isEnabled = enabled
+        let localChoices = [
+            ("parakeet", "Parakeet v3", localised(
+                "Fastest · about \(Self.parakeetMegabytes) MB",
+                "Самая быстрая · около \(Self.parakeetMegabytes) МБ")),
+            ("whisper", "Whisper large-v3-turbo", localised(
+                "Best multilingual accuracy · about 550 MB",
+                "Лучшая точность на разных языках · около 550 МБ")),
+            ("gigaam", "GigaAM v3", localised(
+                "Alternative for Russian · about 260 MB",
+                "Альтернатива для русского · около 260 МБ")),
+        ]
+        let localCards = localChoices.map { id, title, detail in
+            let download = SetupLayout.actionButton(
+                localised("Download…", "Скачать…"),
+                target: self,
+                action: #selector(downloadLocalClicked(_:)))
+            download.identifier = NSUserInterfaceItemIdentifier("transcription.download.\(id)")
+            localDownloadButtons[id] = download
+            return ChoiceCard(id: id, title: title, detail: detail, accessories: [download])
         }
-        localEnginePicker.target = self
-        localEnginePicker.action = #selector(localEngineChanged)
-        localEnginePicker.controlSize = .small
+        localEngineCards.adopt(localCards)
+        localEngineCards.onChange = { [weak self] id in self?.localEnginePicked(id) }
         parakeetStatus.font = SetupLayout.statusFont
         parakeetStatus.textColor = .secondaryLabelColor
         parakeetStatus.lineBreakMode = .byTruncatingTail
+        parakeetStatus.isHidden = true
         // FluidAudio reports no progress, so the bar is the cache directory
         // growing towards the model's known size. Approximate, and better
         // than a spinner that could mean anything.
@@ -341,14 +347,37 @@ final class SetupForm: NSObject, NSTextFieldDelegate {
             title: SetupLayout.title(localised("On this Mac", "На этом маке")),
             detail: SetupLayout.detail(
                 localised(
-                    "Choose a local engine. Nothing leaves the machine; speakers are me / them.",
-                    "Выберите локальный движок. С мака ничего не уходит; спикеры — «я»/«они»."),
+                    "Nothing leaves the machine; local transcripts label speakers as me / them.",
+                    "С мака ничего не уходит; локальные расшифровки помечают спикеров как «я»/«они»."),
                 lines: 2, width: 440),
-            trailing: [localEnginePicker, parakeetBar, parakeetStatus])
+            trailing: [])
+
+        let progress = NSStackView(views: [parakeetBar, parakeetStatus, NSView()])
+        progress.orientation = .horizontal
+        progress.alignment = .centerY
+        progress.spacing = 8
+
+        let localOptions = NSStackView(views: [SetupLayout.cards(localEngineCards.cards), progress])
+        localOptions.orientation = .vertical
+        localOptions.alignment = .leading
+        localOptions.spacing = 9
+        localOptions.edgeInsets = NSEdgeInsets(top: 0, left: 58, bottom: 13, right: 14)
+        for option in localOptions.arrangedSubviews {
+            option.widthAnchor.constraint(
+                equalTo: localOptions.widthAnchor, constant: -72).isActive = true
+        }
+
+        let localBlock = NSStackView(views: [localRow, localOptions])
+        localBlock.orientation = .vertical
+        localBlock.alignment = .leading
+        localBlock.spacing = 0
+        for row in localBlock.arrangedSubviews {
+            row.widthAnchor.constraint(equalTo: localBlock.widthAnchor).isActive = true
+        }
 
         // One row, not two, on an Intel Mac: there is no local model to offer,
         // and the row explains itself rather than vanishing.
-        return SetupLayout.box([cloudRow, providerRow(), localRow])
+        return SetupLayout.box([cloudRow, providerRow(), localBlock])
     }
 
     /// The provider cards and the one key field they share, indented under
@@ -825,13 +854,27 @@ final class SetupForm: NSObject, NSTextFieldDelegate {
         if localSwitch.state == .on { downloadLocalIfNeeded() }
     }
 
-    @objc private func localEngineChanged() {
+    private func localEnginePicked(_ id: String) {
+        localEngineCards.select(id)
         commitTranscription()
-        if localSwitch.state == .on { downloadLocalIfNeeded() }
+        if localSwitch.state == .on { downloadLocalIfNeeded(id) }
+    }
+
+    @objc private func downloadLocalClicked(_ sender: NSButton) {
+        let prefix = "transcription.download."
+        guard let raw = sender.identifier?.rawValue,
+              raw.hasPrefix(prefix)
+        else { return }
+        let id = String(raw.dropFirst(prefix.count))
+        guard Config.localEngines.contains(id) else { return }
+        localEngineCards.select(id)
+        localSwitch.state = .on
+        commitTranscription()
+        downloadLocalIfNeeded(id)
     }
 
     private func commitTranscription() {
-        let selectedLocal = localEnginePicker.selectedItem?.representedObject as? String
+        let selectedLocal = localEngineCards.selected
             ?? transcriptionChoice.localEngine
         let choice = TranscriptionChoice(
             cloud: cloudSwitch.state == .on,
@@ -1039,10 +1082,13 @@ final class SetupForm: NSObject, NSTextFieldDelegate {
     private lazy var systemAudio: SetupPermissions.SystemAudioResult? =
         SetupPermissions.rememberedSystemAudio(heardAt: SetupState.systemAudioHeardAt())
 
-    private func downloadLocalIfNeeded() {
-        if transcriptionChoice.localEngine == "whisper" {
+    private func downloadLocalIfNeeded(_ requestedEngine: String? = nil) {
+        let engine = requestedEngine ?? transcriptionChoice.localEngine
+        localDownloadErrors[engine] = nil
+        parakeetStatus.stringValue = ""
+        if engine == "whisper" {
             downloadWhisperIfNeeded()
-        } else if transcriptionChoice.localEngine == "gigaam" {
+        } else if engine == "gigaam" {
             downloadGigaAMIfNeeded()
         } else {
             downloadParakeetIfNeeded()
@@ -1057,7 +1103,7 @@ final class SetupForm: NSObject, NSTextFieldDelegate {
         parakeetBar.maxValue = 1
         parakeetBar.doubleValue = 0
         parakeetBar.isHidden = false
-        refresh()
+        parakeetStatus.isHidden = false
         gigaAMDownloadTask = Task { [self, gigaAMModelStore] in
             do {
                 _ = try await gigaAMModelStore.download { update in
@@ -1069,12 +1115,14 @@ final class SetupForm: NSObject, NSTextFieldDelegate {
                             parakeetStatus.stringValue = localised(
                                 "downloading · \(Int(fraction * 100))% of about 260 MB",
                                 "скачивание · \(Int(fraction * 100))% из примерно 260 МБ")
+                            localEngineCards.card("gigaam")?.report(parakeetStatus.stringValue)
                         } else {
                             parakeetBar.isIndeterminate = true
                             parakeetBar.startAnimation(nil)
                             parakeetStatus.stringValue = localised(
                                 "downloading · about 260 MB",
                                 "скачивание · около 260 МБ")
+                            localEngineCards.card("gigaam")?.report(parakeetStatus.stringValue)
                         }
                     }
                 }
@@ -1086,7 +1134,7 @@ final class SetupForm: NSObject, NSTextFieldDelegate {
                     .asset: .text(asset),
                     .reason: .text(Analytics.reason(for: error).rawValue),
                 ])
-                parakeetStatus.stringValue =
+                localDownloadErrors["gigaam"] =
                     localised("download failed: ", "не удалось скачать: ") + "\(error)"
             }
             parakeetBar.stopAnimation(nil)
@@ -1095,6 +1143,7 @@ final class SetupForm: NSObject, NSTextFieldDelegate {
             gigaAMDownloadTask = nil
             refresh()
         }
+        refresh()
     }
 
     private func downloadWhisperIfNeeded() {
@@ -1104,7 +1153,7 @@ final class SetupForm: NSObject, NSTextFieldDelegate {
         parakeetBar.maxValue = 1
         parakeetBar.doubleValue = 0
         parakeetBar.isHidden = false
-        refresh()
+        parakeetStatus.isHidden = false
         whisperDownloadTask = Task { [self, whisperModelStore] in
             do {
                 _ = try await whisperModelStore.download { update in
@@ -1116,12 +1165,16 @@ final class SetupForm: NSObject, NSTextFieldDelegate {
                             self.parakeetStatus.stringValue = localised(
                                 "downloading · \(Int(fraction * 100))% of about 550 MB",
                                 "скачивание · \(Int(fraction * 100))% из примерно 550 МБ")
+                            self.localEngineCards.card("whisper")?.report(
+                                self.parakeetStatus.stringValue)
                         } else {
                             self.parakeetBar.isIndeterminate = true
                             self.parakeetBar.startAnimation(nil)
                             self.parakeetStatus.stringValue = localised(
                                 "downloading · about 550 MB",
                                 "скачивание · около 550 МБ")
+                            self.localEngineCards.card("whisper")?.report(
+                                self.parakeetStatus.stringValue)
                         }
                     }
                 }
@@ -1136,7 +1189,7 @@ final class SetupForm: NSObject, NSTextFieldDelegate {
                     .asset: .text("whisper-large-v3-turbo-q5_0"),
                     .reason: .text(Analytics.reason(for: error).rawValue),
                 ])
-                self.parakeetStatus.stringValue =
+                self.localDownloadErrors["whisper"] =
                     localised("download failed: ", "не удалось скачать: ") + "\(error)"
             }
             self.parakeetBar.stopAnimation(nil)
@@ -1145,6 +1198,7 @@ final class SetupForm: NSObject, NSTextFieldDelegate {
             self.whisperDownloadTask = nil
             self.refresh()
         }
+        refresh()
     }
 
     private func downloadParakeetIfNeeded() {
@@ -1165,7 +1219,7 @@ final class SetupForm: NSObject, NSTextFieldDelegate {
                     .asset: .text(asset),
                     .reason: .text(Analytics.reason(for: error).rawValue),
                 ])
-                parakeetStatus.stringValue =
+                localDownloadErrors["parakeet"] =
                     localised("download failed: ", "не удалось скачать: ") + "\(error)"
             }
             parakeetProgress?.invalidate()
@@ -1182,6 +1236,7 @@ final class SetupForm: NSObject, NSTextFieldDelegate {
         parakeetProgress?.invalidate()
         let cache = AsrModels.defaultCacheDirectory(for: ParakeetEngine.configuredVersion())
         parakeetBar.isHidden = false
+        parakeetStatus.isHidden = false
         parakeetBar.isIndeterminate = false
         parakeetBar.maxValue = Double(Self.parakeetMegabytes)
         parakeetBar.doubleValue = 0
@@ -1192,6 +1247,9 @@ final class SetupForm: NSObject, NSTextFieldDelegate {
                 self?.parakeetStatus.stringValue = localised(
                     "\(mb) of about \(Self.parakeetMegabytes) MB",
                     "\(mb) из примерно \(Self.parakeetMegabytes) МБ")
+                if let status = self?.parakeetStatus.stringValue {
+                    self?.localEngineCards.card("parakeet")?.report(status)
+                }
             }
         }
     }
@@ -1644,48 +1702,74 @@ final class SetupForm: NSObject, NSTextFieldDelegate {
 
         localSwitch.isEnabled = Platform.supportsLocalModels
         localSwitch.state = choice.local ? .on : .off
-        localEnginePicker.isEnabled = Platform.supportsLocalModels
-        if let item = localEnginePicker.itemArray.first(where: {
-            $0.representedObject as? String == choice.localEngine
-        }) {
-            localEnginePicker.select(item)
+        localEngineCards.select(choice.localEngine)
+        for card in localEngineCards.cards {
+            card.isEnabled = Platform.supportsLocalModels
+            let button = localDownloadButtons[card.id]
+            guard Platform.supportsLocalModels else {
+                card.report(localised("needs Apple Silicon", "нужен Apple Silicon"))
+                button?.isHidden = true
+                continue
+            }
+
+            let model = localModel(card.id)
+            if isLocalModelDownloaded(card.id, model: model) {
+                card.report(
+                    model.bytes > 0
+                        ? Self.downloaded(model)
+                        : localised("downloaded", "скачана"),
+                    good: true)
+                button?.isHidden = true
+            } else if localModelIsDownloading(card.id) {
+                card.report(localised(
+                    "downloading · about \(localModelMegabytes(card.id)) MB",
+                    "скачивание · около \(localModelMegabytes(card.id)) МБ"))
+                button?.isHidden = true
+            } else if let error = localDownloadErrors[card.id] {
+                card.report(error)
+                button?.isHidden = false
+            } else {
+                card.report("")
+                button?.isHidden = false
+            }
         }
-        if !Platform.supportsLocalModels {
-            parakeetStatus.stringValue = localised(
-                "needs Apple Silicon", "нужен Apple Silicon")
-            parakeetStatus.textColor = .secondaryLabelColor
+
+        let downloading = localEngineCards.cards.contains {
+            localModelIsDownloading($0.id)
+        }
+        if !downloading {
+            parakeetBar.stopAnimation(nil)
             parakeetBar.isHidden = true
-        } else {
-            let selectedModel: ModelStorage.Model
-            let downloadRunning: Bool
-            switch choice.localEngine {
-            case "whisper":
-                selectedModel = modelStorage.whisperModel()
-                downloadRunning = whisperDownloadTask != nil
-            case "gigaam":
-                selectedModel = modelStorage.gigaAMModel()
-                downloadRunning = gigaAMDownloadTask != nil
-            default:
-                selectedModel = modelStorage.parakeet(version: ParakeetEngine.configuredVersion())
-                downloadRunning = parakeetProgress != nil
-            }
-            if selectedModel.isDownloaded {
-                parakeetStatus.stringValue = Self.downloaded(selectedModel)
-                parakeetStatus.textColor = .systemGreen
-                parakeetBar.isHidden = true
-            } else if !downloadRunning {
-                let estimate = switch choice.localEngine {
-                case "whisper": 550
-                case "gigaam": 260
-                default: Self.parakeetMegabytes
-                }
-                parakeetStatus.stringValue = choice.local
-                    ? localised(
-                        "about \(estimate) MB",
-                        "около \(estimate) МБ")
-                    : localised("free", "бесплатно")
-                parakeetStatus.textColor = .secondaryLabelColor
-            }
+            parakeetStatus.isHidden = true
+            parakeetStatus.stringValue = ""
+        }
+    }
+
+    private func localModel(_ id: String) -> ModelStorage.Model {
+        switch id {
+        case "whisper": return modelStorage.whisperModel()
+        case "gigaam": return modelStorage.gigaAMModel()
+        default: return modelStorage.parakeet(version: ParakeetEngine.configuredVersion())
+        }
+    }
+
+    private func isLocalModelDownloaded(_ id: String, model: ModelStorage.Model) -> Bool {
+        id == "parakeet" ? parakeetIsHere() : model.isDownloaded
+    }
+
+    private func localModelIsDownloading(_ id: String) -> Bool {
+        switch id {
+        case "whisper": return whisperDownloadTask != nil
+        case "gigaam": return gigaAMDownloadTask != nil
+        default: return parakeetProgress != nil
+        }
+    }
+
+    private func localModelMegabytes(_ id: String) -> Int {
+        switch id {
+        case "whisper": 550
+        case "gigaam": 260
+        default: Self.parakeetMegabytes
         }
     }
 

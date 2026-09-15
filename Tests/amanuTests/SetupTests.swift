@@ -674,19 +674,70 @@ struct SetupTests {
         }
     }
 
-    @Test("Local engine picker shows Whisper and GigaAM download sizes")
+    @Test("Local engines are separate cards with their download sizes")
     @MainActor
-    func localEngineSizes() throws {
+    func localEngineCards() throws {
+        let previous = InterfaceLanguage.current
+        InterfaceLanguage.current = .english
+        defer { InterfaceLanguage.current = previous }
+
         let setup = SetupWindow()
         defer { withExtendedLifetime(setup) {} }
         let panel = try #require(NSApp.windows.last { $0.title == "amanu setup" })
-        let picker = try #require(panel.contentView?.allDescendants
-            .compactMap { $0 as? NSPopUpButton }
-            .first { $0.identifier?.rawValue == "transcription.local_engine" })
-        #expect(picker.itemTitles.contains { $0.contains("Whisper") && $0.contains("550 MB") })
-        let giga = try #require(picker.itemArray.first { $0.title.contains("GigaAM") })
-        #expect(giga.title.contains("260 MB"))
-        #expect(giga.isEnabled)
+        let cards = panel.contentView?.allDescendants.compactMap { $0 as? ChoiceCard } ?? []
+
+        let parakeet = try #require(cards.first { $0.id == "parakeet" })
+        let whisper = try #require(cards.first { $0.id == "whisper" })
+        let gigaAM = try #require(cards.first { $0.id == "gigaam" })
+        let copy = { (card: ChoiceCard) in
+            card.allDescendants.compactMap { ($0 as? NSTextField)?.stringValue }
+        }
+
+        #expect(copy(parakeet).contains { $0.contains("Fastest") && $0.contains("460 MB") })
+        #expect(copy(whisper).contains {
+            $0.contains("Best multilingual accuracy") && $0.contains("550 MB")
+        })
+        #expect(copy(gigaAM).contains {
+            $0.contains("Alternative for Russian") && $0.contains("260 MB")
+        })
+        for id in ["parakeet", "whisper", "gigaam"] {
+            let card = try #require(cards.first { $0.id == id })
+            #expect(card.allDescendants.compactMap { $0 as? NSButton }.contains {
+                $0.identifier?.rawValue == "transcription.download.\(id)"
+            })
+        }
+        #expect(panel.contentView?.allDescendants.compactMap { $0 as? NSPopUpButton }
+            .contains { $0.identifier?.rawValue == "transcription.local_engine" } == false)
+    }
+
+    @Test("Choosing a local-engine card remembers it without turning the switch on")
+    @MainActor
+    func localEngineCardChoosesWithoutEnabling() throws {
+        let store = TranscriptionStore(engine: "assemblyai")
+        let form = SetupForm()
+        defer { form.stop() }
+        form.storedTranscription = { store.choice }
+        form.write = { store.write($0, $1) }
+        form.refresh()
+
+        let gigaAM = try #require(form.view.allDescendants
+            .compactMap { $0 as? ChoiceCard }
+            .first { $0.id == "gigaam" })
+        let event = try #require(NSEvent.mouseEvent(
+            with: .leftMouseDown,
+            location: NSPoint(x: 120, y: 40),
+            modifierFlags: [],
+            timestamp: 0,
+            windowNumber: 0,
+            context: nil,
+            eventNumber: 1,
+            clickCount: 1,
+            pressure: 1))
+
+        gigaAM.mouseDown(with: event)
+
+        #expect(store.localEngine == "gigaam")
+        #expect(store.engine == "assemblyai")
     }
 
     /// The settings window is not allowed a second, poorer copy of the setup
