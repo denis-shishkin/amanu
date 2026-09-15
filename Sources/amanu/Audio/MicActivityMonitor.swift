@@ -46,6 +46,9 @@ enum MicActivityMonitor {
         "com.webex.meetingmanager",
         "Cisco-Systems.Spark",
         "com.tinyspeck.slackmacgap",
+        "ru.yandex.desktop.telemost",
+        "ru.unlimitedtech.express.desktop",
+        "kontur.talk",
 
         // Messengers with calls. Telegram has separate App Store and direct-
         // download clients, with unrelated bundle ids.

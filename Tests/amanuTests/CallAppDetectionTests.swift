@@ -52,6 +52,9 @@ struct CallAppDetectionTests {
         "com.kagi.kagimacOS",
         "app.zen-browser.zen",
         "company.thebrowser.dia",
+        "ru.yandex.desktop.telemost",
+        "ru.unlimitedtech.express.desktop",
+        "kontur.talk",
     ])
     func popularCallAppsAndBrowsersCount(bundleID: String) {
         let result = MicActivityMonitor.evaluate(
