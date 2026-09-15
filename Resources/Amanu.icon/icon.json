@@ -6,8 +6,30 @@
     {
       "layers" : [
         {
-          "image-name" : "Amanu-feather.svg",
-          "name" : "Amanu feather"
+          "fill-specializations" : [
+            {
+              "value" : {
+                "solid" : "extended-srgb:0.95294,0.93725,0.89804,1.00000"
+              }
+            },
+            {
+              "appearance" : "dark",
+              "value" : {
+                "solid" : "extended-srgb:1.00000,1.00000,1.00000,1.00000"
+              }
+            }
+          ],
+          "glass" : false,
+          "hidden" : false,
+          "image-name" : "Amanu-feather.png",
+          "name" : "Amanu feather",
+          "position" : {
+            "scale" : 1.18,
+            "translation-in-points" : [
+              0,
+              -12
+            ]
+          }
         }
       ],
       "shadow" : {

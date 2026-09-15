@@ -93,6 +93,25 @@ class AppIconTests(unittest.TestCase):
                     f"{appearance} lost the feather foreground layer",
                 )
 
+            groups = {
+                item.get("Appearance"): item
+                for item in renditions
+                if item.get("AssetType") == "IconGroup"
+                and item.get("Name") == "Amanu/Group"
+            }
+            self.assertEqual(set(groups), set(stacks))
+            for appearance, group in groups.items():
+                layer = group["Layers"][0]
+                self.assertEqual(
+                    layer["AssetType"],
+                    "Image",
+                    f"{appearance} must preserve the hollow raster outline",
+                )
+                self.assertFalse(layer["Opaque"])
+                width, height = map(int, layer["LayerSize"].split(","))
+                self.assertGreaterEqual(width, 1200)
+                self.assertGreaterEqual(height, 1200)
+
     def test_app_icon_build_keeps_the_classic_fallback(self):
         self.assertTrue(BUILD_SCRIPT.is_file(), "scripts/build-app-icon.sh is missing")
 

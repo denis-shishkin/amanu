@@ -136,6 +136,39 @@ private func renderIcon(pixels: Int) -> NSBitmapImageRep? {
     return rep
 }
 
+/// The transparent outline layer consumed by Icon Composer. Supplying the
+/// stroked SVG directly does not preserve its open counters: Icon Composer
+/// closes the vane and renders it as a solid, undersized glass shape.
+private func renderAdaptiveLayer(pixels: Int) -> NSBitmapImageRep? {
+    guard let rep = NSBitmapImageRep(
+        bitmapDataPlanes: nil, pixelsWide: pixels, pixelsHigh: pixels,
+        bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+        colorSpaceName: .calibratedRGB, bytesPerRow: 0, bitsPerPixel: 0
+    ) else { return nil }
+    rep.size = NSSize(width: pixels, height: pixels)
+
+    guard let ctx = NSGraphicsContext(bitmapImageRep: rep) else { return nil }
+    NSGraphicsContext.saveGraphicsState()
+    NSGraphicsContext.current = ctx
+    NSColor.clear.setFill()
+    NSRect(x: 0, y: 0, width: pixels, height: pixels).fill()
+
+    let n = CGFloat(pixels)
+    let plateSide = n * 0.824
+    let glyphSide = plateSide * 0.68
+    let svg = featherSVG(strokeWidth: 1.9, color: featherInk, barb: true, filled: false)
+    guard let feather = NSImage(data: Data(svg.utf8)) else {
+        NSGraphicsContext.restoreGraphicsState()
+        return nil
+    }
+    feather.size = NSSize(width: glyphSide, height: glyphSide)
+    let origin = NSPoint(x: (n - glyphSide) / 2, y: (n - glyphSide) / 2)
+    feather.draw(at: origin, from: NSRect(origin: .zero, size: feather.size),
+                 operation: .sourceOver, fraction: 1)
+    NSGraphicsContext.restoreGraphicsState()
+    return rep
+}
+
 // MARK: - Iconset
 
 private func fail(_ message: String) -> Never {
@@ -151,8 +184,19 @@ private func writePNG(_ rep: NSBitmapImageRep, to url: URL) throws {
 }
 
 let args = CommandLine.arguments
+if args.count == 3, args[1] == "--adaptive-layer" {
+    let output = URL(fileURLWithPath: args[2]).standardizedFileURL
+    try? FileManager.default.createDirectory(
+        at: output.deletingLastPathComponent(), withIntermediateDirectories: true)
+    guard let rep = renderAdaptiveLayer(pixels: 1024) else {
+        fail("could not render adaptive icon layer")
+    }
+    try writePNG(rep, to: output)
+    print("wrote \(output.path)")
+    exit(0)
+}
 guard args.count == 2 else {
-    fail("usage: swift scripts/make-icon.swift <output.icns>")
+    fail("usage: swift scripts/make-icon.swift <output.icns> | --adaptive-layer <output.png>")
 }
 let output = URL(fileURLWithPath: args[1]).standardizedFileURL
 
