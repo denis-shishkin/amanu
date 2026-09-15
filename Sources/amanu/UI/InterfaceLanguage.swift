@@ -59,9 +59,10 @@ enum InterfaceLanguage: String, CaseIterable, Sendable {
     /// or a Mac set to Portuguese.
     ///
     /// `preferred` is `Locale.preferredLanguages`: identifiers like `en-GB` or
-    /// `ru-RU`, most wanted first. A language amanu has no words for is passed
-    /// over rather than being taken as English, because the next one down the
-    /// list may well be one it has.
+    /// `ru-RU`, with the Mac's interface language first. Only that first answer
+    /// decides. Amanu speaks Russian on a Russian Mac and English everywhere
+    /// else; walking farther down the list can put a Polish Mac into Russian
+    /// merely because Russian is one of its owner's secondary languages.
     static func choose(configured: String?, preferred: [String]) -> InterfaceLanguage {
         if let configured, configured != automatic, !configured.isEmpty {
             if let named = InterfaceLanguage(rawValue: configured) { return named }
@@ -69,12 +70,10 @@ enum InterfaceLanguage: String, CaseIterable, Sendable {
                 "warning: unknown interface_language \"\(configured)\" — asking the Mac instead\n"
                     .utf8))
         }
-        for identifier in preferred {
-            let code = Locale(identifier: identifier).language.languageCode?.identifier
-                ?? identifier.prefix(while: { $0 != "-" && $0 != "_" }).lowercased()
-            if let known = InterfaceLanguage(rawValue: code) { return known }
-        }
-        return .english
+        guard let identifier = preferred.first else { return .english }
+        let code = Locale(identifier: identifier).language.languageCode?.identifier
+            ?? identifier.prefix(while: { $0 != "-" && $0 != "_" }).lowercased()
+        return code == InterfaceLanguage.russian.rawValue ? .russian : .english
     }
 
     /// Shared mutable state behind a lock rather than an actor, for the same

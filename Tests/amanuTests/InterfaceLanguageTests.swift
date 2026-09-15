@@ -22,10 +22,11 @@ struct InterfaceLanguageTests {
         #expect(InterfaceLanguage.choose(configured: nil, preferred: ["en-GB"]) == .english)
         #expect(InterfaceLanguage.choose(configured: "auto", preferred: ["ru"]) == .russian)
 
-        // A language amanu has no words for is passed over rather than being
-        // taken for English: the next one down the list may well be one it
-        // has, and that list is in order of preference for a reason.
-        #expect(InterfaceLanguage.choose(configured: nil, preferred: ["de-DE", "ru-RU"]) == .russian)
+        // The Mac's primary language is the one its owner asked applications
+        // to speak. If amanu cannot speak it, English is the fallback; picking
+        // a lower language from the list can put a Polish Mac into Russian.
+        #expect(InterfaceLanguage.choose(
+            configured: nil, preferred: ["pl-PL", "ru-RU", "en-US"]) == .english)
         #expect(InterfaceLanguage.choose(configured: nil, preferred: ["ja-JP"]) == .english)
         #expect(InterfaceLanguage.choose(configured: nil, preferred: []) == .english)
 
