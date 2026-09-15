@@ -40,7 +40,7 @@ struct AnalyticsQueueTests {
             { [self] body in
                 keep(body)
                 if delay > .zero { try? await Task.sleep(for: delay) }
-                return succeeds
+                return succeeds ? .all : .retry
             }
         }
 
@@ -56,7 +56,7 @@ struct AnalyticsQueueTests {
     ) -> AnalyticsSink {
         AnalyticsSink(
             store: store,
-            transport: transport ?? { _ in true },
+            transport: transport ?? { _ in .all },
             clock: clock,
             switchIsOn: { on },
             identity: { (id: "test-identity", isFirstRun: firstRun) })
@@ -83,12 +83,12 @@ struct AnalyticsQueueTests {
     @Test("installed fires on the first run and not on the second")
     func installedIsOnce() {
         let store = Self.scratch()
-        let first = Self.sink(store: store, firstRun: true, transport: { _ in false })
+        let first = Self.sink(store: store, firstRun: true, transport: { _ in .retry })
         first.start(surface: .app)
         first.flush(waitingUpTo: 0.5)
         #expect(first.bufferedCount == 1)
 
-        let second = Self.sink(store: store, firstRun: false, transport: { _ in false })
+        let second = Self.sink(store: store, firstRun: false, transport: { _ in .retry })
         second.start(surface: .app)
         second.flush(waitingUpTo: 0.5)
         // The one from the first run, still unsent, and nothing added.
@@ -98,14 +98,14 @@ struct AnalyticsQueueTests {
     @Test("What could not be sent is still there after a restart")
     func failedSendsSurviveARestart() {
         let store = Self.scratch()
-        let failing = Self.sink(store: store, transport: { _ in false })
+        let failing = Self.sink(store: store, transport: { _ in .retry })
         failing.start(surface: .app)
         failing.record(.recordingFinished, [.durationBucket: .text("5_15m")])
         failing.record(.transcriptFinished, [.engine: .text("parakeet")])
         failing.flush(waitingUpTo: 0.5)
         #expect(failing.bufferedCount == 2)
 
-        let next = Self.sink(store: store, transport: { _ in false })
+        let next = Self.sink(store: store, transport: { _ in .retry })
         next.start(surface: .app)
         next.flush(waitingUpTo: 0.5)
         #expect(next.bufferedCount == 2)
@@ -152,7 +152,7 @@ struct AnalyticsQueueTests {
         func sink(version: String) -> AnalyticsSink {
             AnalyticsSink(
                 store: store,
-                transport: { _ in false },
+                transport: { _ in .retry },
                 switchIsOn: { true },
                 identity: { (id: "test-identity", isFirstRun: false) },
                 appVersion: { version },
@@ -191,7 +191,7 @@ struct AnalyticsQueueTests {
     @Test("The queue stops at its ceiling, dropping the oldest")
     func theQueueHasACeiling() {
         let store = Self.scratch()
-        let sink = Self.sink(store: store, transport: { _ in false })
+        let sink = Self.sink(store: store, transport: { _ in .retry })
         sink.start(surface: .app)
         for _ in 0..<(AnalyticsSink.capacity + 40) {
             sink.record(.recordingStarted, [.trigger: .text("manual")])
@@ -204,14 +204,14 @@ struct AnalyticsQueueTests {
     func staleEventsAreDropped() {
         let store = Self.scratch()
         let old = Date()
-        let stale = Self.sink(store: store, transport: { _ in false }, clock: { old })
+        let stale = Self.sink(store: store, transport: { _ in .retry }, clock: { old })
         stale.start(surface: .app)
         stale.record(.recordingStarted, [.trigger: .text("manual")])
         stale.flush(waitingUpTo: 0.5)
         #expect(stale.bufferedCount == 1)
 
         let later = old.addingTimeInterval(AnalyticsSink.maximumAge + 60)
-        let fresh = Self.sink(store: store, transport: { _ in false }, clock: { later })
+        let fresh = Self.sink(store: store, transport: { _ in .retry }, clock: { later })
         fresh.start(surface: .app)
         fresh.flush(waitingUpTo: 0.5)
         #expect(fresh.bufferedCount == 0)

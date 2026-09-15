@@ -12,7 +12,21 @@ import Foundation
 /// a store that cannot be written is dropped in silence. Analytics never
 /// delays quitting by more than a moment — see `flush(waitingUpTo:)`.
 final class AnalyticsSink: @unchecked Sendable {
-    typealias Transport = @Sendable (Data) async -> Bool
+    enum Delivery: Sendable {
+        case all
+        case accepted(Set<Int>)
+        case retry
+    }
+    typealias Transport = @Sendable (Data) async -> Delivery
+
+    private struct WireEntry: Sendable {
+        let queueID: String
+        let receiptKey: String
+    }
+    private struct Batch: Sendable {
+        let body: Data
+        let entries: [WireEntry]
+    }
 
     /// Where events go. Umami's website id is public: it selects the dataset
     /// but grants no read access.
@@ -236,30 +250,40 @@ final class AnalyticsSink: @unchecked Sendable {
         guard !sending else { return }
         pending = pending.filter { !isExpired($0) }
         savePending()
-        let batch = pending
-        guard !batch.isEmpty, let body = encode(batch) else {
+        guard let batch = encode(pending) else {
             finishFlushes()
             return
         }
         sending = true
-        let sentIDs = Set(batch.compactMap { $0["queue_id"] as? String })
         Task { [self] in
-            let ok = await transport(body)
+            let delivery = await transport(batch.body)
             queue.async { [self] in
                 sending = false
                 reread()
-                if ok, enabled {
-                    // Only what was sent: the queue may have grown while the
-                    // request was in flight, and dropping those would lose
-                    // exactly the events of a busy minute.
-                    pending.removeAll { event in
-                        (event["queue_id"] as? String).map { sentIDs.contains($0) } ?? false
+                let accepted: Set<Int>
+                switch delivery {
+                case .all: accepted = Set(batch.entries.indices)
+                case .accepted(let indices): accepted = indices.intersection(batch.entries.indices)
+                case .retry: accepted = []
+                }
+                if enabled, !accepted.isEmpty {
+                    // Persist each wire acknowledgement independently. If an
+                    // event succeeds but identify fails, retry only identify.
+                    // Queue IDs also protect events appended during the send.
+                    for index in accepted {
+                        let entry = batch.entries[index]
+                        if let position = pending.firstIndex(where: { $0["queue_id"] as? String == entry.queueID }) {
+                            pending[position][entry.receiptKey] = true
+                        }
+                    }
+                    pending.removeAll {
+                        $0["identity_delivered"] as? Bool == true && $0["event_delivered"] as? Bool == true
                     }
                     savePending()
                 }
-                if ok, !pending.isEmpty, !flushWaiters.isEmpty {
-                    // Events may have arrived while this request was in
-                    // flight. A caller waiting on flush asked for those too.
+                if accepted.count == batch.entries.count, !pending.isEmpty, !flushWaiters.isEmpty {
+                    // Drain bounded batches during an explicit flush. Partial
+                    // failures wait for the timer instead of retrying in a loop.
                     send()
                 } else {
                     finishFlushes()
@@ -274,27 +298,33 @@ final class AnalyticsSink: @unchecked Sendable {
         for waiter in waiters { waiter() }
     }
 
-    private func encode(_ batch: [[String: Any]]) -> Data? {
-        var wireBatch: [[String: Any]] = []
-        wireBatch.reserveCapacity(batch.count * 2)
-        for event in batch {
-            if let payload = event["payload"] as? [String: Any] {
-                var identity: [String: Any] = [:]
-                for key in ["website", "hostname", "language", "id", "timestamp"] {
-                    if let value = payload[key] { identity[key] = value }
-                }
-                wireBatch.append(["type": "identify", "payload": identity])
+    private func encode(_ events: [[String: Any]]) -> Batch? {
+        var wire: [[String: Any]] = []
+        var entries: [WireEntry] = []
+        eventLoop: for event in events {
+            guard let queueID = event["queue_id"] as? String,
+                  var payload = event["payload"] as? [String: Any] else { continue }
+            if let stamp = payload["timestamp"] as? Double {
+                guard stamp.isFinite, stamp >= Double(Int64.min), stamp < Double(Int64.max) else { continue }
+                // Normalize at the wire boundary, including persisted events
+                // written by older versions with fractional seconds.
+                payload["timestamp"] = Int64(stamp.rounded(.down))
             }
-            var wireEvent = event
-            wireEvent.removeValue(forKey: "queue_id")
-            if var payload = wireEvent["payload"] as? [String: Any],
-               let data = payload["data"] as? [String: Any] {
+            if let data = payload["data"] as? [String: Any] {
                 payload["data"] = AnalyticsCatalogue.sanitized(data)
-                wireEvent["payload"] = payload
             }
-            wireBatch.append(wireEvent)
+            for (type, key) in [("identify", "identity_delivered"), ("event", "event_delivered")] {
+                guard event[key] as? Bool != true else { continue }
+                if wire.count == 500 { break eventLoop }
+                let part = type == "identify"
+                    ? payload.filter { ["website", "hostname", "language", "id", "timestamp"].contains($0.key) }
+                    : payload
+                wire.append(["type": type, "payload": part])
+                entries.append(WireEntry(queueID: queueID, receiptKey: key))
+            }
         }
-        return try? JSONSerialization.data(withJSONObject: wireBatch)
+        guard !wire.isEmpty, let body = try? JSONSerialization.data(withJSONObject: wire) else { return nil }
+        return Batch(body: body, entries: entries)
     }
 
     private static let post: Transport = { body in
@@ -304,17 +334,38 @@ final class AnalyticsSink: @unchecked Sendable {
         request.setValue(userAgent, forHTTPHeaderField: "User-Agent")
         request.httpBody = body
         request.timeoutInterval = 10
-        guard let (_, response) = try? await URLSession.shared.data(for: request),
+        guard let count = (try? JSONSerialization.jsonObject(with: body) as? [Any])?.count,
+              let (data, response) = try? await URLSession.shared.data(for: request),
               let http = response as? HTTPURLResponse
-        else { return false }
-        // Permanent client errors retire the batch; rate limits and request
-        // timeouts are temporary and must leave it available for a retry.
-        return acceptsResponse(status: http.statusCode)
+        else { return .retry }
+        return deliveryResponse(status: http.statusCode, data: data, sentCount: count)
     }
 
-    static func acceptsResponse(status: Int) -> Bool {
-        (200..<300).contains(status)
-            || ((400..<500).contains(status) && status != 408 && status != 429)
+    /// HTTP 200 confirms only the batch envelope. Umami reports individual
+    /// rejection inside its JSON body; missing or inconsistent receipts must
+    /// never cause events to disappear from the persistent queue.
+    static func deliveryResponse(status: Int, data: Data, sentCount: Int) -> Delivery {
+        struct Receipt: Decodable {
+            struct Failure: Decodable { let index: Int }
+            let size: Int
+            let processed: Int
+            let errors: Int
+            let details: [Failure]
+            let cache: String?
+        }
+        guard (200..<300).contains(status), sentCount > 0, sentCount <= 500,
+              let receipt = try? JSONDecoder().decode(Receipt.self, from: data),
+              receipt.size == sentCount, receipt.errors >= 0, receipt.errors <= sentCount,
+              receipt.processed == sentCount - receipt.errors,
+              // Bot-filtered requests can be counted as processed without
+              // storage. A real successful send supplies a session receipt.
+              receipt.processed == 0 || receipt.cache?.isEmpty == false,
+              receipt.details.count == receipt.errors else { return .retry }
+        let rejected = Set(receipt.details.map(\.index))
+        guard rejected.count == receipt.errors,
+              rejected.allSatisfy({ (0..<sentCount).contains($0) }) else { return .retry }
+        if rejected.isEmpty { return .all }
+        return .accepted(Set(0..<sentCount).subtracting(rejected))
     }
 
     deinit {

@@ -10,19 +10,20 @@ struct AnalyticsConsentTests {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
         let sink = AnalyticsSink(store: root.appendingPathComponent("pending.json"),
-                                 transport: { _ in true }, switchIsOn: { true },
+                                 transport: { _ in .all }, switchIsOn: { true },
                                  identity: { Issue.record("Identity requested before start"); return ("test", true) })
         sink.flush(waitingUpTo: 0.1)
         #expect(sink.bufferedCount == 0)
         #expect(!FileManager.default.fileExists(atPath: root.path))
     }
-    @Test("Temporary HTTP rejection keeps the batch retryable")
+    @Test("HTTP rejection retains the batch even when the body claims success")
     func retryableResponses() {
-        for status in [408, 429, 500, 503] {
-            #expect(!AnalyticsSink.acceptsResponse(status: status))
-        }
-        for status in [200, 204, 400, 401, 413] {
-            #expect(AnalyticsSink.acceptsResponse(status: status))
+        let receipt = Data(#"{"size":2,"processed":2,"errors":0,"details":[],"cache":"test-receipt"}"#.utf8)
+        for status in [400, 401, 403, 408, 413, 429, 500, 503] {
+            guard case .retry = AnalyticsSink.deliveryResponse(status: status, data: receipt, sentCount: 2) else {
+                Issue.record("HTTP \(status) must not retire analytics")
+                continue
+            }
         }
     }
 
@@ -83,7 +84,7 @@ struct AnalyticsConsentTests {
         defer { try? FileManager.default.removeItem(at: root) }
         let collector = Collector()
         let sink = sink(root.appendingPathComponent("pending.json"), Switch(true),
-                        transport: { await collector.send($0) })
+                        transport: { await collector.send($0) ? .all : .retry })
         sink.start(surface: .app)
         sink.record(.transcriptFailed, [.engine: .text("private-engine-name"),
                                       .backend: .text("private-server-name"),
@@ -96,7 +97,7 @@ struct AnalyticsConsentTests {
     }
 
     private func sink(_ store: URL, _ toggle: Switch,
-                      transport: @escaping AnalyticsSink.Transport = { _ in false }) -> AnalyticsSink {
+                      transport: @escaping AnalyticsSink.Transport = { _ in .retry }) -> AnalyticsSink {
         AnalyticsSink(store: store, transport: transport, switchIsOn: { toggle.get() },
                       identity: { ("consent-test", false) }, appVersion: { nil },
                       markVersionSeen: { _ in false })
@@ -143,7 +144,7 @@ struct AnalyticsConsentTests {
         defer { try? FileManager.default.removeItem(at: root) }
         let delivery = Delivery()
         let sink = sink(root.appendingPathComponent("pending.json"), Switch(true),
-                        transport: { await delivery.send($0) })
+                        transport: { await delivery.send($0) ? .all : .retry })
         sink.start(surface: .app)
         for _ in 0..<AnalyticsSink.capacity { sink.record(.recordingStarted, [:]) }
         #expect(sink.bufferedCount == AnalyticsSink.capacity)
