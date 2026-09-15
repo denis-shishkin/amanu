@@ -6,40 +6,25 @@
         <description>Updates for amanu, a local-first meeting recorder for macOS.</description>
         <language>en</language>
         <item>
-            <title>0.4.23</title>
-            <pubDate>Tue, 15 Sep 2026 21:28:04 +0000</pubDate>
+            <title>0.4.24</title>
+            <pubDate>Tue, 15 Sep 2026 21:47:36 +0000</pubDate>
             <sparkle:minimumSystemVersion>14.2</sparkle:minimumSystemVersion>
-            <description><![CDATA[<h2>Amanu 0.4.23</h2>
-<h3>Local transcription</h3>
+            <description><![CDATA[<h2>Amanu 0.4.24</h2>
+<h3>Homebrew installation</h3>
 <ul>
-<li>Whisper large-v3-turbo and GigaAM v3 can now be downloaded and used directly in Amanu alongside Parakeet.</li>
-<li>Model downloads show progress and the exact disk space used by both Whisper and GigaAM. GigaAM is tuned for Russian speech.</li>
-<li>A failed recording can be transcribed again from the recordings list, with a choice of available transcription engines.</li>
-</ul>
-<h3>Import existing recordings</h3>
-<ul>
-<li>Drop audio or video files onto the recordings window, or choose Import from the File menu or menu bar.</li>
-<li>Imports show queue and transcription progress, can be cancelled, and appear alongside recordings when complete.</li>
-</ul>
-<h3>Summaries</h3>
-<ul>
-<li>Ollama and custom OpenAI-compatible endpoints can now generate summaries without sending recordings to Amanu&#x27;s default provider.</li>
-<li>Advanced settings include an editable summary template, prefilled with Amanu&#x27;s default instructions.</li>
-</ul>
-<h3>Live transcript</h3>
-<ul>
-<li>A lightweight echo filter reduces duplicated You/Them lines when recording without headphones.</li>
+<li>Amanu can be installed with <code>brew install --cask gsamat/tap/amanu</code>.</li>
+<li>A Homebrew-managed <code>amanu</code> command now takes precedence over Amanu&#x27;s private <code>~/.local/bin/amanu</code> link, avoiding a duplicate command after installation.</li>
 </ul>
 <h3>Compatibility</h3>
 <ul>
 <li>Universal binary for Apple Silicon and Intel Macs running macOS 14.2 or later. Local transcription requires Apple Silicon; Intel requires a cloud transcription key and has not been tested on physical hardware.</li>
 </ul>]]></description>
             <enclosure
-                url="https://github.com/gsamat/amanu/releases/download/v0.4.23/amanu-v0.4.23-macos-universal.dmg"
-                sparkle:version="299"
-                sparkle:shortVersionString="0.4.23"
-                sparkle:edSignature="lwk0+9jxhIYDZYeSiOqPpchVnQIocSVgxmvP97045Hfy2WFQaLJ2zixYR21b5aTY/mM+i4bwwIkprWtaaUu6CQ=="
-                length="23324913"
+                url="https://github.com/gsamat/amanu/releases/download/v0.4.24/amanu-v0.4.24-macos-universal.dmg"
+                sparkle:version="301"
+                sparkle:shortVersionString="0.4.24"
+                sparkle:edSignature="tRpUwj7sNduemG8jjAyj3jYH2DKe5So/A89KtYIwA/Ncqy1kY6MAvAEoQVI8vWURh4WBvFsMZlbHixUxYUGvBA=="
+                length="23327947"
                 type="application/octet-stream" />
         </item>
     </channel>
