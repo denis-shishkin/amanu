@@ -20,9 +20,9 @@
 
 # Universal: one binary with an arm64 and an x86_64 slice, so the same release
 # runs on Apple Silicon and on the Intel Macs still taking macOS 15. Two
-# --arch flags move the product out of .build/release into SwiftPM's Apple
-# multi-arch directory, which is why this path is not the obvious one.
-BUILT = .build/apple/Products/Release/amanu
+# --arch flags select a multi-arch directory. Ask SwiftPM for its path:
+# Xcode 27's Swift Build engine uses .build/out instead of .build/apple.
+BUILT = $(shell swift build -c release --arch arm64 --arch x86_64 --show-bin-path)/amanu
 
 # The application bundle. Assembled by hand rather than by an Xcode project:
 # the package already builds and tests with SwiftPM, and an .app is a

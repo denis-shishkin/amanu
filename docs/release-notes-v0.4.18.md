@@ -9,5 +9,6 @@
 
 ## Compatibility
 
+- Release packaging now discovers SwiftPM's output directory, including the new Xcode 27 build engine.
 - Universal binary for Apple Silicon and Intel Macs running macOS 15 or later. Intel requires a cloud transcription key and has not been tested on physical hardware.
 - Audio capture and echo-suppression behavior are unchanged in this release.

@@ -77,7 +77,8 @@ before it costs time and nothing else. Do not "helpfully" reorder them.
 2. **Build and sign.** `make app`. Both Amanu and its LocalVQE dylib are
    universal. The Swift build uses `swift build
    --arch arm64 --arch x86_64`, which also moves the product to
-   `.build/apple/Products/Release/amanu` — and the target refuses to finish if
+   its multi-architecture output directory (queried with `--show-bin-path`,
+   because Xcode versions use different paths) — and the target refuses to finish if
    either slice is missing, because a single-architecture disk image looks
    perfectly fine until someone on the other kind of Mac opens it. Test the
    Intel slice on an Apple Silicon Mac with `arch -x86_64
