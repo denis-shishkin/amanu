@@ -33,8 +33,9 @@ test "$(git -C "$GGML" rev-parse HEAD)" = "$GGML_REV" \
 # Compare every tracked parent file to HEAD, including staged changes. The
 # nested repository is checked independently so its dirty gitlink marker does
 # not alter the approved parent patch digest.
+# Full object IDs keep the digest independent of clone size and core.abbrev.
 ACTUAL_PARENT_DIFF_SHA=$(
-    git -C "$SOURCE" diff --binary HEAD -- . ':(exclude)ggml/vendor/ggml' \
+    git -C "$SOURCE" diff --binary --full-index HEAD -- . ':(exclude)ggml/vendor/ggml' \
         | shasum -a 256 | awk '{print $1}'
 )
 if [ "$ACTUAL_PARENT_DIFF_SHA" != "$PARENT_DIFF_SHA" ]; then
@@ -43,7 +44,7 @@ if [ "$ACTUAL_PARENT_DIFF_SHA" != "$PARENT_DIFF_SHA" ]; then
 fi
 
 ACTUAL_GGML_DIFF_SHA=$(
-    git -C "$GGML" diff --binary HEAD -- . \
+    git -C "$GGML" diff --binary --full-index HEAD -- . \
         | shasum -a 256 | awk '{print $1}'
 )
 if [ "$ACTUAL_GGML_DIFF_SHA" != "$GGML_DIFF_SHA" ]; then
