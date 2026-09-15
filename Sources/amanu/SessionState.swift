@@ -11,6 +11,9 @@ enum SessionState {
         /// Present when a session was retired without a transcript.
         static let transcriptionFailed = "transcription_failed"
         static let transcriptionAttempts = "transcription_attempts"
+        /// Optional per-session choice made from Recordings' Re-transcribe
+        /// context menu. It survives another manual retry as the last choice.
+        static let transcriptionEngine = "transcription_engine"
         /// `deferred` — every backend failed for a reason that will pass (no
         /// network, spent allowance): retry later. `failed: <reason>` — it
         /// won't work on a retry. Absent — nothing to do, either because the

@@ -16,8 +16,15 @@ enum SettingsSchema {
         case choice([String])
         case number(unit: String)
         case text
+        /// A wrapping, vertically roomy text field for prompts and templates.
+        case multilineText
         /// A comma-separated list, stored as an array of strings.
         case list
+
+        var isMultiline: Bool {
+            if case .multilineText = self { return true }
+            return false
+        }
     }
 
     struct Entry {
@@ -90,6 +97,13 @@ enum SettingsSchema {
                           "Which service auto uploads to. assemblyai has no length limit; openai charges more.",
                           "Куда auto отправляет запись. У assemblyai нет предела длины, openai дороже."),
                       .choice(["assemblyai", "openai"]), default: "assemblyai", askedInSetup: true),
+                Entry(["transcription", "local_engine"],
+                      localised("Local engine", "Локальный движок"),
+                      localised(
+                          "Used when this universal app runs on Apple Silicon.",
+                          "Используется, когда универсальная сборка работает на Apple Silicon."),
+                      .choice(["parakeet", "whisper", "gigaam"]),
+                      default: "parakeet", askedInSetup: true),
                 Entry(["transcription", "language"], localised("Meeting language", "Язык встреч"),
                       localised(
                           "Two-letter code for what meetings are mostly in. English is expected "
@@ -112,12 +126,19 @@ enum SettingsSchema {
                   localised(
                       "auto: the cloud engine when there's a key and the network answers, parakeet otherwise.",
                       "auto — облачный движок, когда есть ключ и отвечает сеть, иначе parakeet."),
-                  .choice(["auto", "assemblyai", "openai", "parakeet"]), default: "auto", askedInSetup: true),
+                      .choice(["auto", "assemblyai", "openai", "parakeet", "whisper", "gigaam"]), default: "auto", askedInSetup: true),
             Entry(["transcription", "cloud"], localised("Cloud engine", "Облачный движок"),
                   localised(
                       "Which service auto uploads to. assemblyai has no length limit; openai charges more.",
                       "Куда auto отправляет запись. У assemblyai нет предела длины, openai дороже."),
                   .choice(["assemblyai", "openai"]), default: "assemblyai", askedInSetup: true),
+            Entry(["transcription", "local_engine"],
+                  localised("Local engine", "Локальный движок"),
+                  localised(
+                      "Which private model auto uses when the cloud is unavailable.",
+                      "Какую локальную модель auto использует, когда облако недоступно."),
+                  .choice(["parakeet", "whisper", "gigaam"]),
+                  default: "parakeet", askedInSetup: true),
             Entry(["transcription", "language"], localised("Meeting language", "Язык встреч"),
                   localised(
                       "Two-letter code for what meetings are mostly in. English is expected "
@@ -305,16 +326,34 @@ enum SettingsSchema {
                       "Used by the codex CLI and the OpenAI API.",
                       "Для codex CLI и для OpenAI API."),
                   .text, default: "gpt-5"),
+            Entry(["summary", "openai_base_url"],
+                  localised("OpenAI-compatible Base URL", "Base URL OpenAI-compatible API"),
+                  localised(
+                      "The API root, including /v1. Leave the default for OpenAI itself.",
+                      "Корень API вместе с /v1. Для самого OpenAI оставьте значение по умолчанию."),
+                  .text, default: "https://api.openai.com/v1"),
             Entry(["summary", "ollama_model"],
                   localised("Local model", "Местная модель"),
                   localised("The fully-offline fallback.", "Запасной вариант, целиком без сети."),
                   .text, default: "qwen3:8b"),
+            Entry(["summary", "ollama_base_url"],
+                  localised("Ollama Base URL", "Base URL Ollama"),
+                  localised(
+                      "Where Amanu reaches Ollama. A non-local address may send meeting content off this Mac.",
+                      "Где Amanu находит Ollama. При нелокальном адресе содержимое встречи может уйти с этого мака."),
+                  .text, default: "http://127.0.0.1:11434"),
             Entry(["summary", "language"],
                   localised("Summary language", "Язык саммари"),
                   localised(
                       "Leave empty to write in whichever language the meeting was held in.",
                       "Пусто — саммари пишется на языке самой встречи."),
                   .text, default: localised("the language of the meeting", "язык встречи")),
+            Entry(["summary", "template"],
+                  localised("Summary template", "Шаблон саммари"),
+                  localised(
+                      "Instructions sent to the model. Clear the field to restore the built-in template.",
+                      "Инструкции для модели. Очистите поле, чтобы вернуть встроенный шаблон."),
+                  .multilineText, default: SummaryTemplate.default),
             Entry(["summary", "api_key_path"],
                   localised("Anthropic key file", "Файл ключа Anthropic"),
                   localised(
@@ -535,7 +574,7 @@ enum SettingsSchema {
             guard let number = Int(text) else { return .invalid }
             return entry.defaultValue as? Int == number ? .clear : .set(number)
 
-        case (.text(let raw), .text):
+        case (.text(let raw), .text), (.text(let raw), .multilineText):
             let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
             if text.isEmpty || entry.defaultValue as? String == text { return .clear }
             return .set(text)

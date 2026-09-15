@@ -75,18 +75,10 @@ enum Tooling {
     /// shell again — for after someone has installed something and come back.
     static func forget() { cache.clear() }
 
-    /// Whether ollama is answering on its usual port, and with which models.
+    /// Whether configured Ollama is answering, and with which models.
     /// nil means nothing is listening: not an error, just the common case.
-    static func ollamaModels() async -> [String]? {
-        var request = URLRequest(url: URL(string: "http://127.0.0.1:11434/api/tags")!)
-        request.timeoutInterval = 2
-        guard
-            let (data, response) = try? await URLSession.shared.data(for: request),
-            (response as? HTTPURLResponse)?.statusCode == 200,
-            let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-            let models = json["models"] as? [[String: Any]]
-        else { return nil }
-        return models.compactMap { $0["name"] as? String }
+    static func ollamaModels() async -> [OllamaClient.Model]? {
+        try? await OllamaClient.listModels(baseURL: Config.summary().ollamaBaseURL)
     }
 
     // MARK: - the cache

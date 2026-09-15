@@ -9,6 +9,27 @@ import Testing
 /// retried that evening or written off, and whether a model that answered with
 /// nonsense is asked the same question for ever.
 struct LLMFailureTests {
+    @Test("The configured summary template is the instruction sent with the transcript")
+    func customSummaryTemplateBuildsThePrompt() {
+        let prompt = Summarizer.singlePassPrompt(
+            body: "me: We approved the launch.",
+            header: "Meeting: Launch review\n",
+            template: "## Decisions\nList only decisions.")
+
+        #expect(prompt.contains("## Decisions\nList only decisions."))
+        #expect(prompt.contains("Meeting: Launch review"))
+        #expect(prompt.hasSuffix("me: We approved the launch."))
+        #expect(!prompt.contains("## What this was about"))
+    }
+
+    @Test("OpenAI-compatible endpoints preserve a base path and avoid double slashes")
+    func compatibleAPIEndpoint() {
+        #expect(OpenAICompatible.endpoint(
+            baseURL: "https://llm.example/openai/v1/", path: "chat/completions")?
+            .absoluteString == "https://llm.example/openai/v1/chat/completions")
+        #expect(OpenAICompatible.endpoint(baseURL: "not a url", path: "models") == nil)
+    }
+
     @Test("A spent allowance is transient — it comes back")
     func usageLimitIsTransient() {
         let cli = LLMError.exit(1, "Claude usage limit reached. Resets at 5pm.")

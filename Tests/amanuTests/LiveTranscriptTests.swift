@@ -43,6 +43,77 @@ struct LiveTranscriptTests {
         ])
     }
 
+    @Test("Live preview hides a long microphone echo of nearby system speech")
+    func liveEchoIsHiddenFromTheSnapshot() {
+        let them = LiveTranscriptState.Entry.speech(.init(
+            speaker: .them,
+            text: "сегодня мы обсудим запуск новой версии продукта",
+            startMilliseconds: 1_000,
+            isProvisional: false))
+        let you = LiveTranscriptState.Entry.speech(.init(
+            speaker: .you,
+            text: "сегодня мы обсудим запуск новой версии продукта",
+            startMilliseconds: 1_800,
+            isProvisional: true))
+
+        #expect(LiveEchoFilter.visibleEntries([them, you]) == [them])
+    }
+
+    @Test("Live preview tolerates one recognition difference in a ten-word echo")
+    func fuzzyLiveEchoIsHidden() {
+        let them = LiveTranscriptState.Entry.speech(.init(
+            speaker: .them,
+            text: "one two three four five six seven eight nine ten",
+            startMilliseconds: 2_000,
+            isProvisional: false))
+        let you = LiveTranscriptState.Entry.speech(.init(
+            speaker: .you,
+            text: "one two three four five six seven eight wrong ten",
+            startMilliseconds: 2_600,
+            isProvisional: true))
+
+        #expect(LiveEchoFilter.visibleEntries([them, you]) == [them])
+    }
+
+    @Test("Short replies and delayed repetition remain visible")
+    func genuineShortAndDelayedSpeechRemainVisible() {
+        let them = LiveTranscriptState.Entry.speech(.init(
+            speaker: .them,
+            text: "yes that is exactly right",
+            startMilliseconds: 1_000,
+            isProvisional: false))
+        let shortYou = LiveTranscriptState.Entry.speech(.init(
+            speaker: .you,
+            text: "yes exactly right thanks",
+            startMilliseconds: 1_300,
+            isProvisional: false))
+        let delayedYou = LiveTranscriptState.Entry.speech(.init(
+            speaker: .you,
+            text: "yes that is exactly right",
+            startMilliseconds: 5_001,
+            isProvisional: false))
+
+        #expect(LiveEchoFilter.visibleEntries([them, shortYou, delayedYou])
+            == [them, shortYou, delayedYou])
+    }
+
+    @Test("Echo matching never crosses a resumed marker")
+    func liveEchoDoesNotCrossResume() {
+        let them = LiveTranscriptState.Entry.speech(.init(
+            speaker: .them,
+            text: "we should publish the release this evening",
+            startMilliseconds: 1_000,
+            isProvisional: false))
+        let you = LiveTranscriptState.Entry.speech(.init(
+            speaker: .you,
+            text: "we should publish the release this evening",
+            startMilliseconds: 1_500,
+            isProvisional: true))
+
+        #expect(LiveEchoFilter.visibleEntries([them, .resumed, you])
+            == [them, .resumed, you])
+    }
+
     @Test("A pause closes the block and the next words open another")
     func pauseEndsABlock() {
         var state = LiveTranscriptState()

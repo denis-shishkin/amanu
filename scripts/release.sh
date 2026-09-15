@@ -94,12 +94,14 @@ test -s .build/Amanu.app/Contents/Resources/LICENSE \
     || die "the app bundle has no Amanu license"
 test -s .build/Amanu.app/Contents/Resources/THIRD-PARTY-NOTICES.md \
     || die "the app bundle has no third-party notices"
-[ "$(find .build/Amanu.app/Contents/Resources/Licenses -type f | wc -l | tr -d ' ')" = 8 ] \
+[ "$(find .build/Amanu.app/Contents/Resources/Licenses -type f | wc -l | tr -d ' ')" = 12 ] \
     || die "the app bundle does not contain every dependency license"
 test -s .build/Amanu.app/Contents/Resources/Models/localvqe-v1.4-aec-200K-f32.gguf \
     || die "the app bundle has no LocalVQE model"
 test -s .build/Amanu.app/Contents/Frameworks/liblocalvqe.dylib \
     || die "the app bundle has no LocalVQE library"
+test -s .build/Amanu.app/Contents/Frameworks/CTranscribe.framework/Versions/A/CTranscribe \
+    || die "the app bundle has no transcribe.cpp runtime"
 
 step "3/8  verifying the signature"
 codesign --verify --deep --strict --verbose=2 .build/Amanu.app

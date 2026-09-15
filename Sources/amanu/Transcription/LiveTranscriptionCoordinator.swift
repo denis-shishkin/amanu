@@ -76,7 +76,7 @@ actor LiveTranscriptionCoordinator {
         Snapshot(
             isRecording: isRecording,
             isEnabled: transcript.isEnabled,
-            entries: transcript.entries,
+            entries: LiveEchoFilter.visibleEntries(transcript.entries),
             status: status
         )
     }

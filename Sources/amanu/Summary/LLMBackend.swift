@@ -54,9 +54,10 @@ struct LLMBackend {
         case "codex-cli":
             return codex.map { [codexCLI(path: $0, model: openAIModelID)] } ?? []
         case "openai-api":
-            return openAIKey.map { [openAI(key: $0, model: openAIModelID)] } ?? []
+            return openAIKey.map { [openAI(
+                key: $0, model: openAIModelID, baseURL: settings.openAIBaseURL)] } ?? []
         case "ollama":
-            return [ollama(model: settings.ollamaModel)]
+            return [ollama(model: settings.ollamaModel, baseURL: settings.ollamaBaseURL)]
         default:
             var backends: [LLMBackend] = []
             if let claude { backends.append(claudeCLI(path: claude)) }
@@ -64,8 +65,9 @@ struct LLMBackend {
                 backends.append(anthropic(key: anthropicKey, model: anthropicModelID))
             }
             if let codex { backends.append(codexCLI(path: codex, model: openAIModelID)) }
-            if let openAIKey { backends.append(openAI(key: openAIKey, model: openAIModelID)) }
-            backends.append(ollama(model: settings.ollamaModel))
+            if let openAIKey { backends.append(openAI(
+                key: openAIKey, model: openAIModelID, baseURL: settings.openAIBaseURL)) }
+            backends.append(ollama(model: settings.ollamaModel, baseURL: settings.ollamaBaseURL))
             return backends
         }
     }
@@ -152,9 +154,12 @@ struct LLMBackend {
         }
     }
 
-    private static func openAI(key: String, model: String) -> LLMBackend {
+    private static func openAI(key: String, model: String, baseURL: String) -> LLMBackend {
         LLMBackend(name: "openai-api", model: model) { system, prompt in
-            var request = URLRequest(url: URL(string: "https://api.openai.com/v1/chat/completions")!)
+            guard let url = OpenAICompatible.endpoint(
+                baseURL: baseURL, path: "chat/completions")
+            else { throw URLError(.badURL) }
+            var request = URLRequest(url: url)
             request.httpMethod = "POST"
             request.timeoutInterval = 600
             request.setValue("application/json", forHTTPHeaderField: "content-type")
@@ -186,29 +191,10 @@ struct LLMBackend {
 
     // MARK: - local
 
-    private static func ollama(model: String) -> LLMBackend {
+    private static func ollama(model: String, baseURL: String) -> LLMBackend {
         LLMBackend(name: "ollama", model: model) { system, prompt in
-            var request = URLRequest(url: URL(string: "http://127.0.0.1:11434/api/generate")!)
-            request.httpMethod = "POST"
-            request.timeoutInterval = 1800
-            request.setValue("application/json", forHTTPHeaderField: "content-type")
-            request.httpBody = try JSONSerialization.data(withJSONObject: [
-                "model": model,
-                "prompt": "\(system)\n\n\(prompt)",
-                "stream": false,
-                "options": ["temperature": 0.2, "num_ctx": 32768],
-            ])
-
-            let (data, _) = try await URLSession.shared.data(for: request)
-            guard
-                let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                var response = json["response"] as? String
-            else { throw LLMError.malformedResponse("ollama") }
-            // Local reasoning models emit a thinking block before the answer.
-            if let end = response.range(of: "</think>") {
-                response = String(response[end.upperBound...])
-            }
-            return response
+            try await OllamaClient.chat(
+                baseURL: baseURL, model: model, system: system, prompt: prompt)
         }
     }
 

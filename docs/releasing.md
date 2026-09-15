@@ -161,6 +161,8 @@ still pass, and the failure surfaces as a Gatekeeper rejection on somebody
 else's Mac. `make app` signs innermost first:
 
     liblocalvqe.dylib
+    whisper.framework
+    CTranscribe.framework
     Sparkle.framework/Versions/B/Autoupdate
     Sparkle.framework/Versions/B/Updater.app
     Sparkle.framework

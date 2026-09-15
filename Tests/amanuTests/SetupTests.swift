@@ -640,6 +640,53 @@ struct SetupTests {
             .first { $0.title.hasPrefix("Install Ollama") })
 
         #expect(install.identifier?.rawValue == "https://ollama.com/download/mac")
+        let copy = ollama.allDescendants.compactMap { ($0 as? NSTextField)?.stringValue }
+        #expect(copy.contains { $0.contains("remote URL") })
+    }
+
+    @Test("OpenAI-compatible and Ollama endpoints are editable where they are chosen")
+    @MainActor
+    func summaryEndpointsAreVisibleInSetup() throws {
+        let setup = SetupWindow()
+        defer { withExtendedLifetime(setup) {} }
+        let panel = try #require(NSApp.windows.last { $0.title == "amanu setup" })
+        let fields = panel.contentView?.allDescendants
+            .compactMap { $0 as? NSTextField }
+        let byID = Dictionary(uniqueKeysWithValues: (fields ?? []).compactMap { field in
+            field.identifier.map { ($0.rawValue, field) }
+        })
+
+        #expect(byID["summary.openai_base_url"]?.stringValue
+            == "https://api.openai.com/v1")
+        #expect(byID["summary.openai_model"]?.stringValue == "gpt-5")
+        #expect(byID["summary.ollama_base_url"]?.stringValue
+            == "http://127.0.0.1:11434")
+        #expect(byID["summary.ollama_model"]?.stringValue == "qwen3:8b")
+
+        panel.contentView?.layoutSubtreeIfNeeded()
+        let ollama = try #require(panel.contentView?.allDescendants
+            .compactMap { $0 as? ChoiceCard }
+            .first { $0.id == "ollama" })
+        for id in ["summary.ollama_base_url", "summary.ollama_model"] {
+            let field = try #require(byID[id])
+            let frame = field.convert(field.bounds, to: ollama)
+            #expect(frame.maxX <= ollama.bounds.maxX + 1, "\(id) spills outside the Ollama card")
+        }
+    }
+
+    @Test("Local engine picker shows Whisper and GigaAM download sizes")
+    @MainActor
+    func localEngineSizes() throws {
+        let setup = SetupWindow()
+        defer { withExtendedLifetime(setup) {} }
+        let panel = try #require(NSApp.windows.last { $0.title == "amanu setup" })
+        let picker = try #require(panel.contentView?.allDescendants
+            .compactMap { $0 as? NSPopUpButton }
+            .first { $0.identifier?.rawValue == "transcription.local_engine" })
+        #expect(picker.itemTitles.contains { $0.contains("Whisper") && $0.contains("550 MB") })
+        let giga = try #require(picker.itemArray.first { $0.title.contains("GigaAM") })
+        #expect(giga.title.contains("260 MB"))
+        #expect(giga.isEnabled)
     }
 
     /// The settings window is not allowed a second, poorer copy of the setup
@@ -991,6 +1038,42 @@ struct SetupTests {
         #expect(openAI.url?.absoluteString == "https://api.openai.com/v1/models")
         #expect(openAI.httpMethod == "GET")
         #expect(openAI.value(forHTTPHeaderField: "authorization") == "Bearer openai-secret")
+
+        let compatible = SummaryKeyProbe.request(
+            provider: .openAI,
+            key: "compatible-secret",
+            openAIBaseURL: "https://llm.example/v1/")
+        #expect(compatible.url?.absoluteString == "https://llm.example/v1/models")
+        #expect(compatible.value(forHTTPHeaderField: "authorization")
+            == "Bearer compatible-secret")
+    }
+
+    @Test("OpenAI-compatible endpoints require TLS away from this Mac")
+    func compatibleEndpointTransport() {
+        #expect(OpenAICompatible.endpoint(
+            baseURL: "http://localhost:8080/v1", path: "models")?.absoluteString
+            == "http://localhost:8080/v1/models")
+        #expect(OpenAICompatible.endpoint(
+            baseURL: "http://127.0.0.1:8080/v1", path: "models") != nil)
+        #expect(OpenAICompatible.endpoint(
+            baseURL: "http://llm.example/v1", path: "models") == nil)
+        #expect(OpenAICompatible.endpoint(
+            baseURL: "https://llm.example/v1", path: "models") != nil)
+    }
+
+    @Test("Ollama is ready only when the selected model exists")
+    func selectedOllamaModel() {
+        let models = [
+            OllamaClient.Model(
+                name: "qwen3.5:4b", bytes: 3_400_000_000,
+                remoteModel: nil, remoteHost: nil),
+            OllamaClient.Model(
+                name: "gpt-oss:cloud", bytes: 0,
+                remoteModel: "gpt-oss", remoteHost: "https://ollama.com"),
+        ]
+        #expect(SetupSelection.ollamaModel(named: "qwen3.5:4b", in: models)?.isRemote == false)
+        #expect(SetupSelection.ollamaModel(named: "gpt-oss:cloud", in: models)?.isRemote == true)
+        #expect(SetupSelection.ollamaModel(named: "missing:latest", in: models) == nil)
     }
 
     @Test("Ordinary links start visible; availability detection may hide install links")
@@ -1089,6 +1172,7 @@ private final class TranscriptionStore {
     /// nil is the setting absent from the file, which reads as `auto`.
     var engine: String?
     var cloud = "assemblyai"
+    var localEngine = "parakeet"
     var enabled = true
     /// Every write, in order, for comparing one click against another.
     var log: [String] = []
@@ -1103,7 +1187,8 @@ private final class TranscriptionStore {
             engine: engine ?? "auto",
             cloudProvider: cloud,
             enabled: enabled,
-            localModels: Platform.supportsLocalModels)
+            localModels: Platform.supportsLocalModels,
+            localEngine: localEngine)
     }
 
     /// nil removes the setting, exactly as it does in the file.
@@ -1113,6 +1198,8 @@ private final class TranscriptionStore {
         case ["transcription", "enabled"]: enabled = value as? Bool ?? true
         case ["transcription", "engine"]: engine = value as? String
         case ["transcription", "cloud"]: cloud = value as? String ?? "assemblyai"
+        case ["transcription", "local_engine"]:
+            localEngine = value as? String ?? "parakeet"
         default: Issue.record("the form wrote \(path.joined(separator: ".")), which is not ours")
         }
     }

@@ -8,7 +8,8 @@ depends on the transcription, speaker-naming, and summary backends you choose.
 
 - Recording is local. Microphone audio, system audio, and optional live
   transcription are captured and stored on the Mac.
-- Parakeet transcription and Ollama summaries run locally.
+- Parakeet transcription runs locally. Ollama summaries run locally when its
+  Base URL is localhost/loopback; another host receives the summary input.
 - If you enable AssemblyAI or OpenAI transcription, Amanu uploads the meeting
   audio to that provider.
 - If you select Claude Code, Codex, Anthropic, or OpenAI for summaries or

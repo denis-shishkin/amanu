@@ -142,6 +142,11 @@ struct Run: ParsableCommand {
             MainActor.assumeIsolated { controller.toggleWindow(alreadyActive: alreadyActive) }
         }
         delegate.onTerminate = { MainActor.assumeIsolated { controller.finishForTermination() } }
+        delegate.onPrepareTermination = { completion in
+            MainActor.assumeIsolated {
+                controller.prepareForTermination(completion: completion)
+            }
+        }
         // Asked before the quit rather than after it, which is the whole
         // difference: onTerminate saves the session, this decides whether the
         // meeting should be interrupted at all.
@@ -149,6 +154,7 @@ struct Run: ParsableCommand {
             recordingElapsed: { MainActor.assumeIsolated { controller.recordingElapsed } })
         delegate.onShowSettings = { MainActor.assumeIsolated { controller.showSettings() } }
         delegate.onShowSetup = { MainActor.assumeIsolated { controller.showSetup() } }
+        delegate.onImport = { MainActor.assumeIsolated { controller.chooseMediaToImport() } }
         controller.onSetupAvailable = { available in
             MainActor.assumeIsolated { delegate.setupAvailable(available) }
         }
@@ -255,6 +261,18 @@ struct Run: ParsableCommand {
         appItem.submenu = appMenu
         main.addItem(appItem)
 
+        let fileItem = NSMenuItem()
+        let fileMenu = NSMenu(title: localised("File", "Файл"))
+        let importItem = NSMenuItem(
+            title: localised("Import…", "Импортировать…"),
+            action: #selector(AppDelegate.importClicked(_:)),
+            keyEquivalent: "i"
+        )
+        importItem.target = settingsTarget
+        fileMenu.addItem(importItem)
+        fileItem.submenu = fileMenu
+        main.addItem(fileItem)
+
         let windowItem = NSMenuItem()
         let windowMenu = NSMenu(title: localised("Window", "Окно"))
         windowMenu.addItem(withTitle: localised("Close", "Закрыть"),
@@ -303,11 +321,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// the one that brought amanu forward.
     var onReopen: ((_ alreadyActive: Bool) -> Void)?
     var onTerminate: (() -> Void)?
+    /// Gives asynchronous filesystem work a chance to cancel and remove its
+    /// unpublished staging folder before the process exits. Returning true
+    /// means the callback will answer AppKit's deferred termination request.
+    var onPrepareTermination: ((_ completion: @escaping () -> Void) -> Bool)?
     /// The app menu's Settings item hangs off the delegate because it is the
     /// only NSObject in the picture — AppController is a plain class, and a
     /// menu item needs a target it can send a selector to.
     var onShowSettings: (() -> Void)?
     var onShowSetup: (() -> Void)?
+    var onImport: (() -> Void)?
     var onCheckForUpdates: (() -> Void)?
     var onShowAbout: (() -> Void)?
     /// Answers whether ⌘Q needs to ask first. The default gate knows of no
@@ -343,28 +366,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// alert leads with the elapsed time and then says exactly that (.issues/005,
     /// where a quit during a call cost three minutes of it).
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        guard case .ask(let elapsed) = quitGate.decide() else { return .terminateNow }
+        if case .ask(let elapsed) = quitGate.decide() {
+            let running = AppController.format(elapsed)
+            let alert = NSAlert()
+            alert.messageText = localised(
+                "Quit while a recording is running? It has been going for \(running).",
+                "Выйти во время записи? Она идёт уже \(running).")
+            alert.informativeText = localised(
+                """
+                Quitting stops the recording and saves it — nothing recorded so far is lost, \
+                and it will be transcribed like any other session. But nothing is recorded \
+                after this until amanu runs again.
+                """,
+                """
+                При выходе запись остановится и сохранится — записанное не пропадёт \
+                и будет расшифровано, как любая другая сессия. Но дальше, до следующего \
+                запуска amanu, ничего записываться не будет.
+                """)
+            alert.addButton(withTitle: localised(
+                "Quit and save the recording", "Выйти и сохранить запись"))
+            alert.addButton(withTitle: localised("Keep recording", "Продолжить запись"))
+            guard alert.runModal() == .alertFirstButtonReturn else {
+                return .terminateCancel
+            }
+        }
 
-        let running = AppController.format(elapsed)
-        let alert = NSAlert()
-        alert.messageText = localised(
-            "Quit while a recording is running? It has been going for \(running).",
-            "Выйти во время записи? Она идёт уже \(running).")
-        alert.informativeText = localised(
-            """
-            Quitting stops the recording and saves it — nothing recorded so far is lost, \
-            and it will be transcribed like any other session. But nothing is recorded \
-            after this until amanu runs again.
-            """,
-            """
-            При выходе запись остановится и сохранится — записанное не пропадёт \
-            и будет расшифровано, как любая другая сессия. Но дальше, до следующего \
-            запуска amanu, ничего записываться не будет.
-            """)
-        alert.addButton(withTitle: localised(
-            "Quit and save the recording", "Выйти и сохранить запись"))
-        alert.addButton(withTitle: localised("Keep recording", "Продолжить запись"))
-        return alert.runModal() == .alertFirstButtonReturn ? .terminateNow : .terminateCancel
+        let deferred = onPrepareTermination? {
+            sender.reply(toApplicationShouldTerminate: true)
+        } ?? false
+        return deferred ? .terminateLater : .terminateNow
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -382,6 +412,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc func showSettingsClicked(_ sender: Any?) { onShowSettings?() }
     @objc func showSetupClicked(_ sender: Any?) { onShowSetup?() }
+    @objc func importClicked(_ sender: Any?) { onImport?() }
     @objc func checkForUpdatesClicked(_ sender: Any?) { onCheckForUpdates?() }
     @objc func showAboutClicked(_ sender: Any?) { onShowAbout?() }
 }
@@ -433,6 +464,7 @@ final class AppController {
         gate: UpdateGate(isRecording: { [weak self] in self?.isRecording == true })
     )
     private let transcription = TranscriptionCoordinator()
+    private let mediaImport: MediaImportCoordinator
     private let liveTranscription = LiveTranscriptionCoordinator()
     private let calendar: CalendarWatcher?
     private let autoRecord: AutoRecordController
@@ -449,7 +481,13 @@ final class AppController {
         session.map { Date().timeIntervalSince($0.startedAt) }
     }
     private var ticker: Timer?
-    private lazy var recordings = RecordingsWindow(root: root)
+    private lazy var recordings: RecordingsWindow = {
+        let window = RecordingsWindow(root: root)
+        window.onImportFiles = { [weak self] files in self?.importFiles(files) }
+        window.onCancelImport = { [weak self] in self?.cancelImport() }
+        window.onChooseImport = { [weak self] in self?.chooseMediaToImport() }
+        return window
+    }()
     private var network: NetworkMonitor?
     private var setupRequestObserver: NSObjectProtocol?
     /// How the app menu is told whether to offer **Setup…**; the status
@@ -470,9 +508,12 @@ final class AppController {
     /// in the middle of one.
     private var recordingActivity: NSObjectProtocol?
     private var automaticFeaturesStarted = false
+    private var mediaImportTask: Task<Void, Never>?
+    private var pendingImports = MediaImportPendingQueue()
 
     init(root: URL) {
         self.root = root
+        mediaImport = MediaImportCoordinator(root: root)
 
         let settings = Config.autoRecord()
         // The calendar is worth reading for names even when it isn't a
@@ -486,6 +527,7 @@ final class AppController {
         menuBar.onToggleAutoRecord = { [weak self] in self?.toggleAutoRecord() }
         menuBar.onOpenFolder = { [weak self] in self?.openFolder() }
         menuBar.onShowRecordings = { [weak self] in self?.showRecordings() }
+        menuBar.onImport = { [weak self] in self?.chooseMediaToImport() }
         menuBar.onShowWindow = { [weak self] in self?.showWindow() }
         menuBar.onShowSettings = { [weak self] in self?.showSettings() }
         menuBar.onShowSetup = { [weak self] in self?.showSetup() }
@@ -501,6 +543,9 @@ final class AppController {
         window.onToggleLive = { [weak self] enabled in self?.toggleLive(enabled) }
         window.onOpenFolder = { [weak self] in self?.openFolder() }
         window.onShowRecordings = { [weak self] in self?.showRecordings() }
+        window.onImportFiles = { [weak self] files in self?.importFiles(files) }
+        window.onCancelImport = { [weak self] in self?.cancelImport() }
+        window.onChooseImport = { [weak self] in self?.chooseMediaToImport() }
         window.updateLivePreference(enabled: Config.liveTranscriptionEnabled())
         if Config.showWindowAtLaunch(), !SetupState.isPending { window.show() }
 
@@ -623,6 +668,75 @@ final class AppController {
 
     func checkForUpdates() { updates.checkForUpdates() }
 
+    /// Both menu commands end here, so there is one picker and one import
+    /// pipeline regardless of where a person starts from.
+    func chooseMediaToImport() {
+        guard let files = MediaImportPicker.choose(), !files.isEmpty else { return }
+        importFiles(files)
+    }
+
+    /// Also used by drag-and-drop entry points in the windows. The importer
+    /// publishes complete filesystem sessions; only then are they handed to
+    /// the ordinary transcription queue, exactly like a recording just ended.
+    func importFiles(_ files: [URL]) {
+        guard !files.isEmpty else { return }
+        pendingImports.enqueue(files)
+        guard mediaImportTask == nil else { return }
+        mediaImportTask = Task { [weak self, mediaImport, transcription] in
+            guard let self else { return }
+            var combined = MediaImportCoordinator.Result()
+            while !pendingImports.isEmpty, !Task.isCancelled {
+                let batch = pendingImports.takeAll()
+                let result = await mediaImport.importFiles(batch) { [weak self] update in
+                    Task { @MainActor [weak self] in self?.showImport(update) }
+                }
+                combined.imported.append(contentsOf: result.imported)
+                combined.duplicates.append(contentsOf: result.duplicates)
+                combined.failures.append(contentsOf: result.failures)
+                combined.cancelled = combined.cancelled || result.cancelled
+                for imported in result.imported {
+                    await transcription.enqueue(imported.session)
+                }
+                if result.cancelled { break }
+            }
+            if Task.isCancelled { combined.cancelled = true }
+            pendingImports.removeAll()
+            finishImport(combined)
+            mediaImportTask = nil
+        }
+    }
+
+    func cancelImport() {
+        pendingImports.removeAll()
+        mediaImportTask?.cancel()
+        Task { [mediaImport] in await mediaImport.cancel() }
+    }
+
+    /// AppKit can defer quit, so use that time to wait for the import actor's
+    /// cancellation handler and staging-folder cleanup rather than leaving a
+    /// half-written `.import-*` folder behind.
+    func prepareForTermination(completion: @escaping () -> Void) -> Bool {
+        guard let running = mediaImportTask else { return false }
+        pendingImports.removeAll()
+        running.cancel()
+        Task { [mediaImport] in
+            await mediaImport.cancel()
+            await running.value
+            completion()
+        }
+        return true
+    }
+
+    private func showImport(_ update: MediaImportCoordinator.Update) {
+        window.updateImport(update)
+        recordings.updateImport(update)
+    }
+
+    private func finishImport(_ result: MediaImportCoordinator.Result) {
+        window.finishImport(result)
+        recordings.finishImport(result)
+    }
+
     /// Stop any live session cleanly (finalizing files) and exit.
     func shutdown() {
         finishForTermination()
@@ -633,6 +747,10 @@ final class AppController {
     /// to happen when the quit came from ⌘Q or the Dock rather than from us.
     /// Idempotent: stopSession does nothing without a session.
     func finishForTermination() {
+        // `applicationShouldTerminate` normally waits for this cancellation.
+        // Keep the request here too for shutdown paths that skip that hook.
+        mediaImportTask?.cancel()
+        Task { [mediaImport] in await mediaImport.cancel() }
         stopSession(reason: "app-quit")
     }
 

@@ -560,10 +560,13 @@ struct WindowGallery {
                 "started": "2026-08-19T09:05:00Z", "duration_seconds": 480,
                 "title": localised("Call with the studio", "Звонок со студией"),
                 "trigger": "mic-activity",
+                "files": ["source": "source.m4a"],
                 SessionState.Key.transcriptionFailed:
                     "no spoken audio in the recording",
             ],
             transcript: false, speakers: false, summary: false)
+        try Data([0]).write(to: root
+            .appendingPathComponent("2026.08.19-0905/source.m4a"))
 
         try session(
             in: root, named: "2026.08.18-1400",

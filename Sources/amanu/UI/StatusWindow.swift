@@ -19,6 +19,9 @@ final class StatusWindow {
     var onToggleLive: ((Bool) -> Void)?
     var onOpenFolder: (() -> Void)?
     var onShowRecordings: (() -> Void)?
+    var onChooseImport: (() -> Void)?
+    var onImportFiles: (([URL]) -> Void)?
+    var onCancelImport: (() -> Void)?
 
     private let panel: NSWindow
     /// The rows, kept because the window's height is measured from them.
@@ -42,6 +45,7 @@ final class StatusWindow {
     private let liveText = NSTextView()
     private let liveScroll = NSScrollView()
     private let liveSection = NSStackView()
+    private let importStatus = MediaImportStatusView()
 
     /// The window is deliberately small. It answers one question — am I being
     /// recorded — and a recorder that needs a big window to say so is a worse
@@ -175,6 +179,12 @@ final class StatusWindow {
             target: self, action: #selector(showRecordingsClicked))
         manage.bezelStyle = .rounded
 
+        let importButton = NSButton(
+            title: localised("Import…", "Импортировать…"),
+            target: self, action: #selector(chooseImportClicked))
+        importButton.bezelStyle = .rounded
+        importButton.identifier = NSUserInterfaceItemIdentifier("choose-media-import")
+
         let header = NSStackView(views: [icon, stateLabel])
         header.orientation = .horizontal
         header.spacing = 6
@@ -184,9 +194,10 @@ final class StatusWindow {
         buttons.distribution = .fillEqually
         buttons.spacing = 8
 
+        importStatus.onCancel = { [weak self] in self?.onCancelImport?() }
         rows.setViews([
             header, transcriptionLabel, buttons, autoRecordCheckbox, decisionLabel,
-            openFolder, manage, liveSection,
+            importStatus, importButton, openFolder, manage, liveSection,
         ], in: .top)
         rows.orientation = .vertical
         rows.alignment = .leading
@@ -202,7 +213,8 @@ final class StatusWindow {
         // which is the state that draws one row over another. An ordinary
         // view resizes with the window, always, and the rows hang from its
         // top edge.
-        let container = NSView()
+        let container = MediaDropView()
+        container.onFiles = { [weak self] urls in self?.onImportFiles?(urls) }
         container.addSubview(rows)
         panel.contentView = container
 
@@ -224,6 +236,8 @@ final class StatusWindow {
             buttons.widthAnchor.constraint(equalTo: rows.widthAnchor, constant: -32),
             transcriptionLabel.widthAnchor.constraint(equalTo: rows.widthAnchor, constant: -32),
             decisionLabel.widthAnchor.constraint(equalTo: rows.widthAnchor, constant: -32),
+            importStatus.widthAnchor.constraint(equalTo: rows.widthAnchor, constant: -32),
+            importButton.widthAnchor.constraint(equalTo: rows.widthAnchor, constant: -32),
             openFolder.widthAnchor.constraint(equalTo: rows.widthAnchor, constant: -32),
             manage.widthAnchor.constraint(equalTo: rows.widthAnchor, constant: -32),
             liveSection.widthAnchor.constraint(equalTo: rows.widthAnchor, constant: -32),
@@ -240,6 +254,17 @@ final class StatusWindow {
             resize(to: Self.compactSize.height)
         }
         update(state: .idle, elapsed: nil)
+    }
+
+    func updateImport(_ update: MediaImportCoordinator.Update) {
+        if !panel.isVisible { bringToFront() }
+        importStatus.update(update)
+        growToFitContent()
+    }
+
+    func finishImport(_ result: MediaImportCoordinator.Result) {
+        importStatus.finish(result)
+        growToFitContent()
     }
 
     /// Bring the window up. orderFront rather than makeKey: at login this
@@ -486,4 +511,5 @@ final class StatusWindow {
     }
     @objc private func openFolderClicked() { onOpenFolder?() }
     @objc private func showRecordingsClicked() { onShowRecordings?() }
+    @objc private func chooseImportClicked() { onChooseImport?() }
 }

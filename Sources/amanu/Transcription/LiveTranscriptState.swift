@@ -169,6 +169,79 @@ struct LiveTranscriptState: Sendable {
     }
 }
 
+/// Removes only the microphone text that is almost certainly speaker playback
+/// heard through open speakers. The underlying `LiveTranscriptState` remains
+/// untouched: a provisional decode that later diverges from the system side
+/// appears again on the next snapshot instead of being lost.
+enum LiveEchoFilter {
+    private static let maximumStartDelta = 4_000
+    private static let minimumWords = 5
+    private static let minimumCoverage = 0.90
+
+    static func visibleEntries(
+        _ entries: [LiveTranscriptState.Entry]
+    ) -> [LiveTranscriptState.Entry] {
+        var visible: [LiveTranscriptState.Entry] = []
+        var epoch: [LiveTranscriptState.Entry] = []
+
+        func flush() {
+            let remote = epoch.compactMap { entry -> LiveTranscriptState.Block? in
+                guard case .speech(let block) = entry, block.speaker == .them else { return nil }
+                return block
+            }
+            visible.append(contentsOf: epoch.filter { entry in
+                guard case .speech(let block) = entry, block.speaker == .you else { return true }
+                return !remote.contains { isEcho(block, of: $0) }
+            })
+            epoch.removeAll(keepingCapacity: true)
+        }
+
+        for entry in entries {
+            if case .resumed = entry {
+                flush()
+                visible.append(.resumed)
+            } else {
+                epoch.append(entry)
+            }
+        }
+        flush()
+        return visible
+    }
+
+    private static func isEcho(
+        _ microphone: LiveTranscriptState.Block,
+        of system: LiveTranscriptState.Block
+    ) -> Bool {
+        guard abs(microphone.startMilliseconds - system.startMilliseconds) <= maximumStartDelta
+        else { return false }
+        let heard = words(microphone.text)
+        guard heard.count >= minimumWords else { return false }
+        let played = words(system.text)
+        guard !played.isEmpty else { return false }
+        return Double(longestCommonSubsequence(heard, played)) / Double(heard.count)
+            >= minimumCoverage
+    }
+
+    private static func words(_ text: String) -> [String] {
+        text.lowercased().split { !$0.isLetter && !$0.isNumber }.map(String.init)
+    }
+
+    private static func longestCommonSubsequence(_ lhs: [String], _ rhs: [String]) -> Int {
+        guard !lhs.isEmpty, !rhs.isEmpty else { return 0 }
+        var previous = Array(repeating: 0, count: rhs.count + 1)
+        for left in lhs {
+            var current = Array(repeating: 0, count: rhs.count + 1)
+            for (index, right) in rhs.enumerated() {
+                current[index + 1] = left == right
+                    ? previous[index] + 1
+                    : max(previous[index + 1], current[index])
+            }
+            previous = current
+        }
+        return previous[rhs.count]
+    }
+}
+
 /// The streaming engine reports the whole session's transcript on every
 /// chunk, so a block that has already been closed keeps arriving as the head
 /// of the next report. This subtracts what is already on screen and hands

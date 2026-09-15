@@ -20,6 +20,16 @@ enum SetupSelection {
         default: return backend
         }
     }
+
+    /// The selected Ollama model, not merely any model returned by the
+    /// server. A running server with a different model cannot write the next
+    /// summary and must not be reported as ready.
+    static func ollamaModel(
+        named name: String,
+        in models: [OllamaClient.Model]
+    ) -> OllamaClient.Model? {
+        models.first { $0.name == name }
+    }
 }
 
 /// The transcription section's two switches and its provider, in the
@@ -37,25 +47,33 @@ struct TranscriptionChoice: Equatable {
     /// even while it is off: turning the switch back on should not lose the
     /// answer, and the card is on screen the whole time either way.
     var provider: String
+    /// Local engine used outright or as auto's offline fallback.
+    var localEngine: String = "parakeet"
 
     static func read(
         engine: String,
         cloudProvider: String,
         enabled: Bool,
-        localModels: Bool
+        localModels: Bool,
+        localEngine: String = "parakeet"
     ) -> TranscriptionChoice {
         let named = Config.cloudEngines.contains(engine)
+        let namedLocal = Config.localEngines.contains(engine)
         let provider = named ? engine : cloudProvider
+        let selectedLocal = namedLocal ? engine
+            : (Config.localEngines.contains(localEngine) ? localEngine : "parakeet")
         guard enabled else {
-            return TranscriptionChoice(cloud: false, local: false, provider: provider)
+            return TranscriptionChoice(
+                cloud: false, local: false, provider: provider, localEngine: selectedLocal)
         }
         // Anything that isn't a provider name or "parakeet" is auto — the
         // default, and what an unreadable value falls back to elsewhere too.
-        let auto = !named && engine != "parakeet"
+        let auto = !named && !namedLocal
         return TranscriptionChoice(
             cloud: named || auto,
-            local: localModels && (auto || engine == "parakeet"),
-            provider: provider
+            local: localModels && (auto || namedLocal),
+            provider: provider,
+            localEngine: selectedLocal
         )
     }
 
@@ -117,11 +135,12 @@ struct TranscriptionChoice: Equatable {
             // remembers what it was.
             return [(["transcription", "enabled"], false)]
         }
-        let engine: String? = cloud && local ? nil : (cloud ? provider : "parakeet")
+        let engine: String? = cloud && local ? nil : (cloud ? provider : localEngine)
         return [
             (["transcription", "enabled"], nil),
             (["transcription", "engine"], engine),
             (["transcription", "cloud"], provider == "assemblyai" ? nil : provider),
+            (["transcription", "local_engine"], localEngine == "parakeet" ? nil : localEngine),
         ]
     }
 }
@@ -135,13 +154,18 @@ enum SummaryKeyProbe {
         case openAI
     }
 
-    static func request(provider: Provider, key: String) -> URLRequest {
+    static func request(
+        provider: Provider,
+        key: String,
+        openAIBaseURL: String = "https://api.openai.com/v1"
+    ) -> URLRequest {
         let url: URL
         switch provider {
         case .anthropic:
             url = URL(string: "https://api.anthropic.com/v1/models?limit=1")!
         case .openAI:
-            url = URL(string: "https://api.openai.com/v1/models")!
+            url = OpenAICompatible.endpoint(baseURL: openAIBaseURL, path: "models")
+                ?? URL(string: "about:blank")!
         }
 
         var request = URLRequest(url: url)
@@ -157,9 +181,13 @@ enum SummaryKeyProbe {
         return request
     }
 
-    static func works(provider: Provider, key: String) async -> Bool {
+    static func works(
+        provider: Provider,
+        key: String,
+        openAIBaseURL: String = "https://api.openai.com/v1"
+    ) async -> Bool {
         guard let (_, response) = try? await URLSession.shared.data(
-            for: request(provider: provider, key: key)
+            for: request(provider: provider, key: key, openAIBaseURL: openAIBaseURL)
         ) else { return false }
         return (response as? HTTPURLResponse)?.statusCode == 200
     }

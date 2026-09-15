@@ -14,6 +14,10 @@ license texts are included in every application bundle under
 | [swift-argument-parser](https://github.com/apple/swift-argument-parser) | 1.8.2 | Apache License 2.0 |
 | [Sparkle](https://github.com/sparkle-project/Sparkle) | 2.9.6 | MIT and bundled external notices |
 | Ed25519 verification code distributed with Sparkle | bundled | zlib-style license |
+| [whisper.cpp](https://github.com/ggml-org/whisper.cpp) | 1.9.4 / b5130 (927cfce) | MIT |
+| [transcribe.cpp](https://github.com/handy-computer/transcribe.cpp) | 0.2.0 | MIT |
+| ggml, distributed with transcribe.cpp | bundled | MIT |
+| miniz, distributed with transcribe.cpp | bundled | MIT |
 
 Amanu itself is available under the [MIT license](LICENSE), retaining the
 copyright and license notice of the quill project from which it began.

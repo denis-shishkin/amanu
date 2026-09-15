@@ -125,29 +125,6 @@ enum Summarizer {
         """
     }
 
-    private static let summaryInstructions = """
-    Below is a meeting transcript with speaker labels.
-
-    Write a Markdown note with exactly this structure:
-
-    ## What this was about
-    Two or three sentences: the topic and why they met.
-
-    ## Key points
-    5–10 substantive bullets. Each one a complete thought, not a fragment.
-
-    ## Decisions
-    What was decided. If nothing was, say that plainly.
-
-    ## Action items
-    Lines of "— who: what to do (deadline, if one was named)". If there are none, say so.
-
-    ## Open questions
-    What was left unresolved. Skip the section entirely if there's nothing.
-
-    No preamble, no "here's your note" — start with the Markdown.
-    """
-
     private static let chunkInstructions = """
     Below is one part of a long meeting transcript. Write a compact set of notes on it:
     what was discussed, what was decided, which tasks and questions came up.
@@ -166,9 +143,8 @@ enum Summarizer {
     ) async throws -> String {
         let system = systemPrompt(language: settings.language)
         if body.count <= maxCharsPerCall {
-            return try await backend.call(
-                system, "\(header)\n\(summaryInstructions)\n\n---\n\(body)"
-            )
+            return try await backend.call(system, singlePassPrompt(
+                body: body, header: header, template: settings.template))
         }
 
         let chunks = split(body, limit: maxCharsPerCall)
@@ -181,9 +157,16 @@ enum Summarizer {
         }
         return try await backend.call(
             system,
-            "\(header)\n\(mergeInstructions)\n\(summaryInstructions)\n\n---\n"
+            "\(header)\n\(mergeInstructions)\n\(settings.template)\n\n---\n"
                 + notes.joined(separator: "\n\n---\n\n")
         )
+    }
+
+    /// The whole user-visible instruction for an ordinary meeting. Kept as a
+    /// pure function so a custom template can be proven to replace, rather
+    /// than accidentally sit beside, the built-in one.
+    static func singlePassPrompt(body: String, header: String, template: String) -> String {
+        "\(header)\n\(template)\n\n---\n\(body)"
     }
 
     /// The transcript as the summarizer sees it: one speaker-tagged line per

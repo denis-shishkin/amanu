@@ -35,7 +35,7 @@ enum AnalyticsCatalogue {
             switch entry.kind {
             case .toggle: reportable[key] = .toggle
             case .choice(let allowed): reportable[key] = .choice(allowed)
-            case .number, .text, .list: continue
+            case .number, .text, .multilineText, .list: continue
             }
         }
         return reportable

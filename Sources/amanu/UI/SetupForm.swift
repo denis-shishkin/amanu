@@ -49,7 +49,8 @@ final class SetupForm: NSObject, NSTextFieldDelegate {
             engine: Config.transcriptionEngine(),
             cloudProvider: Config.transcriptionCloudProvider(),
             enabled: Config.transcriptionEnabled(),
-            localModels: Platform.supportsLocalModels)
+            localModels: Platform.supportsLocalModels,
+            localEngine: Config.transcriptionLocalEngine())
     }
     var write: @MainActor ([String], Any?) -> Void = { Config.update(path: $0, value: $1) }
 
@@ -118,6 +119,7 @@ final class SetupForm: NSObject, NSTextFieldDelegate {
     /// The provider in force, read back from the config on every refresh.
     private var provider = "assemblyai"
     private let localSwitch = NSSwitch()
+    private let localEnginePicker = NSPopUpButton()
 
     private let language = NSPopUpButton()
     private let languageNote = NSTextField(labelWithString: "")
@@ -129,6 +131,10 @@ final class SetupForm: NSObject, NSTextFieldDelegate {
     /// figure in each row's prose is what a download will cost; this is what
     /// it did cost, and only this one can be trusted once the files exist.
     private let modelStorage = ModelStorage()
+    private let whisperModelStore = WhisperModelStore()
+    private let gigaAMModelStore = GigaAMModelStore()
+    private var whisperDownloadTask: Task<Void, Never>?
+    private var gigaAMDownloadTask: Task<Void, Never>?
     private var liveDownloadTask: Task<Void, Never>?
     private var liveDownloading = false
     /// What parakeet weighs on disk once it is there — measured, not quoted:
@@ -148,6 +154,11 @@ final class SetupForm: NSObject, NSTextFieldDelegate {
         labels: ["Anthropic", "OpenAI"], trackingMode: .selectOne, target: nil, action: nil)
     private let summaryKey = NSSecureTextField()
     private let summaryKeyStatus = NSTextField(labelWithString: "")
+    private let summaryOpenAIBaseURL = NSTextField()
+    private let summaryOpenAIModel = NSTextField()
+    private let summaryOpenAIOptions = NSStackView()
+    private let summaryOllamaBaseURL = NSTextField()
+    private let summaryOllamaModel = NSTextField()
     private lazy var summaryKeyLink = link(
         localised("Get a key", "Получить ключ"),
         "https://console.anthropic.com/settings/keys")
@@ -255,6 +266,10 @@ final class SetupForm: NSObject, NSTextFieldDelegate {
     func stop() {
         parakeetProgress?.invalidate()
         parakeetProgress = nil
+        whisperDownloadTask?.cancel()
+        whisperDownloadTask = nil
+        gigaAMDownloadTask?.cancel()
+        gigaAMDownloadTask = nil
     }
     // MARK: - building
 
@@ -288,6 +303,25 @@ final class SetupForm: NSObject, NSTextFieldDelegate {
 
         localSwitch.target = self
         localSwitch.action = #selector(localToggled)
+        localEnginePicker.identifier = NSUserInterfaceItemIdentifier("transcription.local_engine")
+        for (title, id, enabled) in [
+            (localised(
+                "Parakeet · ~\(Self.parakeetMegabytes) MB",
+                "Parakeet · ~\(Self.parakeetMegabytes) МБ"), "parakeet", true),
+            (localised(
+                "Whisper large-v3-turbo · ~550 MB",
+                "Whisper large-v3-turbo · ~550 МБ"), "whisper", true),
+            (localised(
+                "GigaAM v3 · ~260 MB · Russian",
+                "GigaAM v3 · ~260 МБ · Русский"), "gigaam", true),
+        ] {
+            localEnginePicker.addItem(withTitle: title)
+            localEnginePicker.lastItem?.representedObject = id
+            localEnginePicker.lastItem?.isEnabled = enabled
+        }
+        localEnginePicker.target = self
+        localEnginePicker.action = #selector(localEngineChanged)
+        localEnginePicker.controlSize = .small
         parakeetStatus.font = SetupLayout.statusFont
         parakeetStatus.textColor = .secondaryLabelColor
         parakeetStatus.lineBreakMode = .byTruncatingTail
@@ -307,12 +341,10 @@ final class SetupForm: NSObject, NSTextFieldDelegate {
             title: SetupLayout.title(localised("On this Mac", "На этом маке")),
             detail: SetupLayout.detail(
                 localised(
-                    "Nvidia parakeet, \(Self.parakeetMegabytes) MB download and disk usage. Nothing leaves "
-                        + "the machine, only me / them in the transcript.",
-                    "Nvidia parakeet, \(Self.parakeetMegabytes) МБ при скачивании и на диске. С мака "
-                        + "ничего не уходит, но в расшифровке только «я» и «они»."),
+                    "Choose a local engine. Nothing leaves the machine; speakers are me / them.",
+                    "Выберите локальный движок. С мака ничего не уходит; спикеры — «я»/«они»."),
                 lines: 2, width: 440),
-            trailing: [parakeetBar, parakeetStatus])
+            trailing: [localEnginePicker, parakeetBar, parakeetStatus])
 
         // One row, not two, on an Intel Mac: there is no local model to offer,
         // and the row explains itself rather than vanishing.
@@ -541,27 +573,47 @@ final class SetupForm: NSObject, NSTextFieldDelegate {
         summaryKeyStatus.textColor = .secondaryLabelColor
         summaryKeyStatus.lineBreakMode = .byWordWrapping
         summaryKeyStatus.maximumNumberOfLines = 2
+        configureSummaryField(summaryOpenAIBaseURL, id: "summary.openai_base_url")
+        configureSummaryField(summaryOpenAIModel, id: "summary.openai_model")
+        summaryOpenAIOptions.orientation = .vertical
+        summaryOpenAIOptions.alignment = .leading
+        summaryOpenAIOptions.spacing = 6
+        summaryOpenAIOptions.addArrangedSubview(summaryFieldRow(
+            localised("Base URL", "URL сервера"), summaryOpenAIBaseURL))
+        summaryOpenAIOptions.addArrangedSubview(summaryFieldRow(
+            localised("Model", "Модель"), summaryOpenAIModel))
         let key = ChoiceCard(
             id: "api-key",
             title: localised("My own key", "Свой ключ"),
             detail: localised(
                 "Billed per meeting, needs no CLI.",
                 "Оплата за встречу, без CLI."),
-            accessories: [keyProvider, summaryKey, summaryKeyStatus, summaryKeyLink])
+            accessories: [keyProvider, summaryKey, summaryOpenAIOptions,
+                          summaryKeyStatus, summaryKeyLink])
 
         // Ollama is a fallback, not a fourth peer: a whole card beside the
         // three real choices reads as a recommendation, and its summaries are
         // the weakest of the four. One slim row keeps it choosable and says so.
+        configureSummaryField(summaryOllamaBaseURL, id: "summary.ollama_base_url")
+        configureSummaryField(summaryOllamaModel, id: "summary.ollama_model")
+        let ollamaOptions = NSStackView(views: [
+            summaryFieldRow(localised("Base URL", "URL сервера"), summaryOllamaBaseURL),
+            summaryFieldRow(localised("Model", "Модель"), summaryOllamaModel),
+        ])
+        ollamaOptions.orientation = .vertical
+        ollamaOptions.alignment = .leading
+        ollamaOptions.spacing = 6
         let ollama = ChoiceCard(
             id: "ollama",
             title: "Ollama",
             detail: localised(
-                "No account, no network. Weaker summaries.",
-                "Без аккаунта и без сети. Саммари слабее."),
-            accessories: [link(
+                "Local by default. A remote URL sends the transcript there.",
+                "По умолчанию локально. Удалённый URL получит расшифровку."),
+            accessories: [
+                ollamaOptions,
+                link(
                 localised("Install Ollama", "Установить Ollama"),
-                "https://ollama.com/download/mac")],
-            compact: true)
+                "https://ollama.com/download/mac")])
 
         summaryCards.adopt([claude, codex, key, ollama])
         summaryCards.onChange = { [weak self] id in
@@ -572,8 +624,8 @@ final class SetupForm: NSObject, NSTextFieldDelegate {
         }
         let disclosure = SetupLayout.detail(
             localised(
-                "Claude, Codex and API models receive the transcript, meeting title and calendar participants. Ollama keeps them on this Mac.",
-                "Claude, Codex и API-модели получают расшифровку, название встречи и участников из календаря. С Ollama всё остаётся на этом маке."),
+                "Claude, Codex and API models receive meeting content. Ollama stays on this Mac only with a localhost URL.",
+                "Claude, Codex и API-модели получают данные встречи. Ollama остаётся на этом маке только с localhost URL."),
             lines: 2,
             width: 520)
         return SetupLayout.group(
@@ -770,14 +822,22 @@ final class SetupForm: NSObject, NSTextFieldDelegate {
     /// was never written is not wanted.
     @objc private func localToggled() {
         commitTranscription()
-        if localSwitch.state == .on { downloadParakeetIfNeeded() }
+        if localSwitch.state == .on { downloadLocalIfNeeded() }
+    }
+
+    @objc private func localEngineChanged() {
+        commitTranscription()
+        if localSwitch.state == .on { downloadLocalIfNeeded() }
     }
 
     private func commitTranscription() {
+        let selectedLocal = localEnginePicker.selectedItem?.representedObject as? String
+            ?? transcriptionChoice.localEngine
         let choice = TranscriptionChoice(
             cloud: cloudSwitch.state == .on,
             local: localSwitch.state == .on && Platform.supportsLocalModels,
-            provider: provider)
+            provider: provider,
+            localEngine: selectedLocal)
         for update in choice.updates {
             write(update.path, update.value)
         }
@@ -889,6 +949,7 @@ final class SetupForm: NSObject, NSTextFieldDelegate {
     /// writes is a redraw that never stops.
     private func showKeyProvider() {
         summaryKey.placeholderString = selectedKeyBackend == "anthropic-api" ? "sk-ant-…" : "sk-…"
+        summaryOpenAIOptions.isHidden = selectedKeyBackend != "openai-api"
         summaryKeyStatus.stringValue = ""
         summaryKeyLink.identifier = NSUserInterfaceItemIdentifier(
             selectedKeyBackend == "anthropic-api"
@@ -898,6 +959,26 @@ final class SetupForm: NSObject, NSTextFieldDelegate {
 
     private var selectedKeyBackend: String {
         keyProvider.selectedSegment == 1 ? "openai-api" : "anthropic-api"
+    }
+
+    private func configureSummaryField(_ field: NSTextField, id: String) {
+        field.identifier = NSUserInterfaceItemIdentifier(id)
+        field.font = SetupLayout.detailFont
+        field.delegate = self
+        field.lineBreakMode = .byTruncatingMiddle
+        field.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+    }
+
+    private func summaryFieldRow(_ title: String, _ field: NSTextField) -> NSView {
+        let label = NSTextField(labelWithString: title)
+        label.font = SetupLayout.detailFont
+        label.textColor = .secondaryLabelColor
+        label.widthAnchor.constraint(equalToConstant: 62).isActive = true
+        let row = NSStackView(views: [label, field])
+        row.orientation = .horizontal
+        row.alignment = .firstBaseline
+        row.spacing = 8
+        return row
     }
 
     /// Register with Login Items, the way every other application does.
@@ -958,6 +1039,114 @@ final class SetupForm: NSObject, NSTextFieldDelegate {
     private lazy var systemAudio: SetupPermissions.SystemAudioResult? =
         SetupPermissions.rememberedSystemAudio(heardAt: SetupState.systemAudioHeardAt())
 
+    private func downloadLocalIfNeeded() {
+        if transcriptionChoice.localEngine == "whisper" {
+            downloadWhisperIfNeeded()
+        } else if transcriptionChoice.localEngine == "gigaam" {
+            downloadGigaAMIfNeeded()
+        } else {
+            downloadParakeetIfNeeded()
+        }
+    }
+
+    private func downloadGigaAMIfNeeded() {
+        guard gigaAMModelStore.bytesOnDisk == 0, gigaAMDownloadTask == nil else { return }
+        let asset = "gigaam-v3-e2e-ctc-q8_0"
+        Analytics.track(.modelDownloadStarted, [.asset: .text(asset)])
+        parakeetBar.minValue = 0
+        parakeetBar.maxValue = 1
+        parakeetBar.doubleValue = 0
+        parakeetBar.isHidden = false
+        refresh()
+        gigaAMDownloadTask = Task { [self, gigaAMModelStore] in
+            do {
+                _ = try await gigaAMModelStore.download { update in
+                    Task { @MainActor [self] in
+                        parakeetBar.isHidden = false
+                        if let fraction = update.fraction {
+                            parakeetBar.isIndeterminate = false
+                            parakeetBar.doubleValue = fraction
+                            parakeetStatus.stringValue = localised(
+                                "downloading · \(Int(fraction * 100))% of about 260 MB",
+                                "скачивание · \(Int(fraction * 100))% из примерно 260 МБ")
+                        } else {
+                            parakeetBar.isIndeterminate = true
+                            parakeetBar.startAnimation(nil)
+                            parakeetStatus.stringValue = localised(
+                                "downloading · about 260 MB",
+                                "скачивание · около 260 МБ")
+                        }
+                    }
+                }
+                Analytics.track(.modelDownloadFinished, [.asset: .text(asset)])
+            } catch is CancellationError {
+                // The chosen engine remains selected and can resume next time.
+            } catch {
+                Analytics.track(.modelDownloadFailed, [
+                    .asset: .text(asset),
+                    .reason: .text(Analytics.reason(for: error).rawValue),
+                ])
+                parakeetStatus.stringValue =
+                    localised("download failed: ", "не удалось скачать: ") + "\(error)"
+            }
+            parakeetBar.stopAnimation(nil)
+            parakeetBar.isIndeterminate = false
+            parakeetBar.isHidden = true
+            gigaAMDownloadTask = nil
+            refresh()
+        }
+    }
+
+    private func downloadWhisperIfNeeded() {
+        guard whisperModelStore.bytesOnDisk == 0, whisperDownloadTask == nil else { return }
+        Analytics.track(.modelDownloadStarted, [.asset: .text("whisper-large-v3-turbo-q5_0")])
+        parakeetBar.minValue = 0
+        parakeetBar.maxValue = 1
+        parakeetBar.doubleValue = 0
+        parakeetBar.isHidden = false
+        refresh()
+        whisperDownloadTask = Task { [self, whisperModelStore] in
+            do {
+                _ = try await whisperModelStore.download { update in
+                    Task { @MainActor [self] in
+                        self.parakeetBar.isHidden = false
+                        if let fraction = update.fraction {
+                            self.parakeetBar.isIndeterminate = false
+                            self.parakeetBar.doubleValue = fraction
+                            self.parakeetStatus.stringValue = localised(
+                                "downloading · \(Int(fraction * 100))% of about 550 MB",
+                                "скачивание · \(Int(fraction * 100))% из примерно 550 МБ")
+                        } else {
+                            self.parakeetBar.isIndeterminate = true
+                            self.parakeetBar.startAnimation(nil)
+                            self.parakeetStatus.stringValue = localised(
+                                "downloading · about 550 MB",
+                                "скачивание · около 550 МБ")
+                        }
+                    }
+                }
+                Analytics.track(.modelDownloadFinished, [
+                    .asset: .text("whisper-large-v3-turbo-q5_0"),
+                ])
+            } catch is CancellationError {
+                // Closing setup pauses an optional download without turning
+                // the chosen engine back into another one.
+            } catch {
+                Analytics.track(.modelDownloadFailed, [
+                    .asset: .text("whisper-large-v3-turbo-q5_0"),
+                    .reason: .text(Analytics.reason(for: error).rawValue),
+                ])
+                self.parakeetStatus.stringValue =
+                    localised("download failed: ", "не удалось скачать: ") + "\(error)"
+            }
+            self.parakeetBar.stopAnimation(nil)
+            self.parakeetBar.isIndeterminate = false
+            self.parakeetBar.isHidden = true
+            self.whisperDownloadTask = nil
+            self.refresh()
+        }
+    }
+
     private func downloadParakeetIfNeeded() {
         guard !parakeetIsHere() else { return }
         guard parakeetProgress == nil else { return }
@@ -993,6 +1182,8 @@ final class SetupForm: NSObject, NSTextFieldDelegate {
         parakeetProgress?.invalidate()
         let cache = AsrModels.defaultCacheDirectory(for: ParakeetEngine.configuredVersion())
         parakeetBar.isHidden = false
+        parakeetBar.isIndeterminate = false
+        parakeetBar.maxValue = Double(Self.parakeetMegabytes)
         parakeetBar.doubleValue = 0
         parakeetProgress = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
@@ -1022,6 +1213,17 @@ final class SetupForm: NSObject, NSTextFieldDelegate {
         guard let field = notification.object as? NSTextField else { return }
         if field === cloudKey { Task { await saveCloudKey() } }
         if field === summaryKey { Task { await saveSummaryKey() } }
+        let summaryPaths: [(NSTextField, String)] = [
+            (summaryOpenAIBaseURL, "openai_base_url"),
+            (summaryOpenAIModel, "openai_model"),
+            (summaryOllamaBaseURL, "ollama_base_url"),
+            (summaryOllamaModel, "ollama_model"),
+        ]
+        if let key = summaryPaths.first(where: { $0.0 === field })?.1 {
+            let value = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            Config.update(path: ["summary", key], value: value.isEmpty ? nil : value)
+            refresh()
+        }
     }
 
     /// Return in a key field submits the key and stops there.
@@ -1044,6 +1246,8 @@ final class SetupForm: NSObject, NSTextFieldDelegate {
     ) -> Bool {
         guard selector == #selector(NSResponder.insertNewline(_:)),
               control === cloudKey || control === summaryKey
+                || control === summaryOpenAIBaseURL || control === summaryOpenAIModel
+                || control === summaryOllamaBaseURL || control === summaryOllamaModel
         else { return false }
         control.window?.makeFirstResponder(nil)
         return true
@@ -1131,7 +1335,13 @@ final class SetupForm: NSObject, NSTextFieldDelegate {
             ? Config.anthropicKeyPath
             : Config.openAIKeyPath
         summaryKeyStatus.stringValue = Self.checkingKey
-        guard await SummaryKeyProbe.works(provider: provider, key: key) else {
+        let openAIBaseURL: String
+        switch provider {
+        case .openAI: openAIBaseURL = Config.summary().openAIBaseURL
+        case .anthropic: openAIBaseURL = "https://api.openai.com/v1"
+        }
+        guard await SummaryKeyProbe.works(
+            provider: provider, key: key, openAIBaseURL: openAIBaseURL) else {
             summaryKeyStatus.stringValue = localised(
                 "that key was refused — nothing was overwritten",
                 "этот ключ не приняли — ничего не перезаписано")
@@ -1199,24 +1409,37 @@ final class SetupForm: NSObject, NSTextFieldDelegate {
         }
 
         let ollamaCard = summaryCards.card("ollama")
+        let ollamaIsLocal = OllamaClient.isLocal(baseURL: Config.summary().ollamaBaseURL)
         if let models {
+            let names = models.prefix(2).map(\.name).joined(separator: ", ")
+            let selected = SetupSelection.ollamaModel(
+                named: Config.summary().ollamaModel, in: models)
             ollamaCard?.report(
                 models.isEmpty
                     ? localised("running, no models", "работает, моделей нет")
-                    : localised("running · ", "работает · ")
-                        + models.prefix(2).joined(separator: ", "),
-                good: true)
+                    : selected == nil
+                        ? localised(
+                            "selected model missing · ",
+                            "нет выбранной модели · ") + names
+                        : localised("running · ", "работает · ")
+                        + names
+                        + (ollamaIsLocal && selected?.isRemote == false
+                            ? "" : localised(" · remote", " · удалённо")),
+                good: selected != nil)
         } else {
             ollamaCard?.report(ollama == nil
                 ? localised("not here", "не установлена")
                 : localised("installed, not running", "установлена, но не запущена"))
         }
-        ollamaCard?.showLink(ollama == nil)
+        ollamaCard?.showLink(ollama == nil && ollamaIsLocal)
 
         summaryToolRuns = [
             "claude-cli": claude?.runs == true,
             "codex-cli": codex?.runs == true,
-            "ollama": models?.isEmpty == false,
+            "ollama": models.map {
+                SetupSelection.ollamaModel(
+                    named: Config.summary().ollamaModel, in: $0) != nil
+            } ?? false,
         ]
         refresh()
     }
@@ -1233,9 +1456,13 @@ final class SetupForm: NSObject, NSTextFieldDelegate {
     /// Whether the local model is on this Mac. A Mac that cannot run it at
     /// all is not missing it, so the question is answered yes there and the
     /// window stops asking.
-    private var parakeetIsDownloaded: Bool {
+    private var localModelIsDownloaded: Bool {
         guard Platform.supportsLocalModels else { return true }
-        return parakeetIsHere()
+        switch transcriptionChoice.localEngine {
+        case "whisper": return whisperModelStore.bytesOnDisk > 0
+        case "gigaam": return gigaAMModelStore.bytesOnDisk > 0
+        default: return parakeetIsHere()
+        }
     }
 
     /// The two switches as the config file has them.
@@ -1246,8 +1473,8 @@ final class SetupForm: NSObject, NSTextFieldDelegate {
     /// Asked for, and not here. **On this Mac** is the whole question: both
     /// switches on is still asking for the local model, because that is the
     /// setting that transcribes when the network doesn't.
-    private var parakeetIsWantedAndMissing: Bool {
-        transcriptionChoice.needsLocalModel(downloaded: parakeetIsDownloaded)
+    private var localModelIsWantedAndMissing: Bool {
+        transcriptionChoice.needsLocalModel(downloaded: localModelIsDownloaded)
     }
 
     /// Summaries are on and the thing chosen to write them is not on this
@@ -1354,6 +1581,10 @@ final class SetupForm: NSObject, NSTextFieldDelegate {
         let backendIsKey = summary.backend == "anthropic-api" || summary.backend == "openai-api"
         summaryCards.select(SetupSelection.summaryChoice(backend: summary.backend))
         if backendIsKey { keyProvider.selectedSegment = summary.backend == "openai-api" ? 1 : 0 }
+        summaryOpenAIBaseURL.stringValue = summary.openAIBaseURL
+        summaryOpenAIModel.stringValue = summary.openAIModel
+        summaryOllamaBaseURL.stringValue = summary.ollamaBaseURL
+        summaryOllamaModel.stringValue = summary.ollamaModel
         showKeyProvider()
         for card in summaryCards.cards { card.isEnabled = summary.enabled }
 
@@ -1413,23 +1644,45 @@ final class SetupForm: NSObject, NSTextFieldDelegate {
 
         localSwitch.isEnabled = Platform.supportsLocalModels
         localSwitch.state = choice.local ? .on : .off
+        localEnginePicker.isEnabled = Platform.supportsLocalModels
+        if let item = localEnginePicker.itemArray.first(where: {
+            $0.representedObject as? String == choice.localEngine
+        }) {
+            localEnginePicker.select(item)
+        }
         if !Platform.supportsLocalModels {
             parakeetStatus.stringValue = localised(
                 "needs Apple Silicon", "нужен Apple Silicon")
             parakeetStatus.textColor = .secondaryLabelColor
             parakeetBar.isHidden = true
         } else {
-            let version = ParakeetEngine.configuredVersion()
-            if parakeetIsHere() {
-                parakeetStatus.stringValue = Self.downloaded(
-                    modelStorage.parakeet(version: version))
+            let selectedModel: ModelStorage.Model
+            let downloadRunning: Bool
+            switch choice.localEngine {
+            case "whisper":
+                selectedModel = modelStorage.whisperModel()
+                downloadRunning = whisperDownloadTask != nil
+            case "gigaam":
+                selectedModel = modelStorage.gigaAMModel()
+                downloadRunning = gigaAMDownloadTask != nil
+            default:
+                selectedModel = modelStorage.parakeet(version: ParakeetEngine.configuredVersion())
+                downloadRunning = parakeetProgress != nil
+            }
+            if selectedModel.isDownloaded {
+                parakeetStatus.stringValue = Self.downloaded(selectedModel)
                 parakeetStatus.textColor = .systemGreen
                 parakeetBar.isHidden = true
-            } else if parakeetProgress == nil {
+            } else if !downloadRunning {
+                let estimate = switch choice.localEngine {
+                case "whisper": 550
+                case "gigaam": 260
+                default: Self.parakeetMegabytes
+                }
                 parakeetStatus.stringValue = choice.local
                     ? localised(
-                        "about \(Self.parakeetMegabytes) MB",
-                        "около \(Self.parakeetMegabytes) МБ")
+                        "about \(estimate) MB",
+                        "около \(estimate) МБ")
                     : localised("free", "бесплатно")
                 parakeetStatus.textColor = .secondaryLabelColor
             }
@@ -1477,8 +1730,11 @@ final class SetupForm: NSObject, NSTextFieldDelegate {
         if SetupPermissions.needsSystemAudioTest(systemAudio) {
             return { [weak self] in Task { await self?.testSystemAudio() } }
         }
-        if parakeetIsWantedAndMissing, parakeetProgress == nil {
-            return { [weak self] in self?.downloadParakeetIfNeeded() }
+        if localModelIsWantedAndMissing,
+           parakeetProgress == nil,
+           whisperDownloadTask == nil,
+           gigaAMDownloadTask == nil {
+            return { [weak self] in self?.downloadLocalIfNeeded() }
         }
         if Config.liveTranscriptionEnabled() {
             let prompt = LiveTranscriptionLanguage.prompt(for: Config.transcriptionLanguage())
@@ -1498,7 +1754,7 @@ final class SetupForm: NSObject, NSTextFieldDelegate {
         if SetupPermissions.needsStartAtLogin { left.append(.startAtLogin) }
         if SetupPermissions.microphone() != .granted { left.append(.microphone) }
         if systemAudio != .heard { left.append(.systemAudio) }
-        if parakeetIsWantedAndMissing { left.append(.parakeet) }
+        if localModelIsWantedAndMissing { left.append(.parakeet) }
         if Config.liveTranscriptionEnabled() {
             let prompt = LiveTranscriptionLanguage.prompt(for: Config.transcriptionLanguage())
             if !liveModelStore.isReady(language: prompt) { left.append(.liveModel) }
@@ -1568,7 +1824,10 @@ final class SetupForm: NSObject, NSTextFieldDelegate {
 
     /// Whether a model is coming down right now — the work a host must not
     /// offer to start a second time.
-    var isDownloading: Bool { liveDownloading || parakeetProgress != nil }
+    var isDownloading: Bool {
+        liveDownloading || parakeetProgress != nil || whisperDownloadTask != nil
+            || gigaAMDownloadTask != nil
+    }
 
     /// What the setup window's primary button says, given where things stand.
     var nextActionTitle: String {
@@ -1587,11 +1846,11 @@ final class SetupForm: NSObject, NSTextFieldDelegate {
         // can be outstanding at once, and a button that says "Download
         // parakeet" while parakeet is downloading has nothing left to do
         // but close the window under the person reading it.
-        if parakeetProgress != nil {
-            return localised("Downloading parakeet…", "Скачивается parakeet…")
+        if parakeetProgress != nil || whisperDownloadTask != nil || gigaAMDownloadTask != nil {
+            return localised("Downloading local model…", "Скачивается локальная модель…")
         }
         if outstanding.contains(.parakeet) {
-            return localised("Download parakeet", "Скачать parakeet")
+            return localised("Download local model", "Скачать локальную модель")
         }
         if liveDownloading {
             return localised("Downloading live model…", "Скачивается модель…")
@@ -1914,7 +2173,7 @@ final class ChoiceCard: NSView, LayerTinted {
             SetupLayout.fitRowHeight(stack)
             return
         }
-        for accessory in accessories where accessory is NSTextField || accessory is NSSegmentedControl {
+        for accessory in accessories where !(accessory is NSButton) {
             accessory.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -20).isActive = true
         }
     }

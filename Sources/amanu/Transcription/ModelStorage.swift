@@ -25,6 +25,8 @@ struct ModelStorage {
         /// that parakeet has versions at all.
         enum Kind: Equatable {
             case parakeet
+            case whisper
+            case gigaAM
             case live
         }
 
@@ -36,20 +38,29 @@ struct ModelStorage {
         /// What the directory holds, in bytes. Zero when it isn't there,
         /// which is also what `isDownloaded` reads.
         let bytes: Int
+        /// What a fresh download is expected to transfer. Unlike `bytes`,
+        /// this is useful before the model exists.
+        let advertisedBytes: Int
 
         var isDownloaded: Bool { bytes > 0 }
     }
 
     private let live: LiveTranscriptionModelStore
+    private let whisper: WhisperModelStore
+    private let gigaAM: GigaAMModelStore
     private let parakeetCache: @Sendable (AsrModelVersion) -> URL
 
     init(
         live: LiveTranscriptionModelStore = LiveTranscriptionModelStore(),
+        whisper: WhisperModelStore = WhisperModelStore(),
+        gigaAM: GigaAMModelStore = GigaAMModelStore(),
         parakeetCache: @escaping @Sendable (AsrModelVersion) -> URL = {
             AsrModels.defaultCacheDirectory(for: $0)
         }
     ) {
         self.live = live
+        self.whisper = whisper
+        self.gigaAM = gigaAM
         self.parakeetCache = parakeetCache
     }
 
@@ -66,6 +77,8 @@ struct ModelStorage {
             let other = parakeet(version: version)
             if other.isDownloaded { models.append(other) }
         }
+        models.append(whisperModel())
+        models.append(gigaAMModel())
         models.append(liveModel())
         return models
     }
@@ -76,7 +89,26 @@ struct ModelStorage {
             kind: .parakeet,
             name: "parakeet \(version == .v2 ? "v2" : "v3")",
             directory: directory,
-            bytes: Self.bytes(of: directory))
+            bytes: Self.bytes(of: directory),
+            advertisedBytes: 460 * 1_048_576)
+    }
+
+    func whisperModel() -> Model {
+        Model(
+            kind: .whisper,
+            name: "Whisper large-v3-turbo",
+            directory: whisper.directory,
+            bytes: whisper.bytesOnDisk,
+            advertisedBytes: Int(WhisperModelStore.advertisedDownloadBytes))
+    }
+
+    func gigaAMModel() -> Model {
+        Model(
+            kind: .gigaAM,
+            name: "GigaAM v3",
+            directory: gigaAM.directory,
+            bytes: gigaAM.bytesOnDisk,
+            advertisedBytes: Int(GigaAMModelStore.advertisedDownloadBytes))
     }
 
     func liveModel() -> Model {
@@ -84,7 +116,8 @@ struct ModelStorage {
             kind: .live,
             name: "NVIDIA nemotron",
             directory: live.modelDirectory,
-            bytes: Self.bytes(of: live.modelDirectory))
+            bytes: Self.bytes(of: live.modelDirectory),
+            advertisedBytes: 600 * 1_048_576)
     }
 
     /// What everything listed comes to. The number a person came to the
@@ -116,9 +149,18 @@ struct ModelStorage {
         liveEnabled: Bool
     ) -> [(path: [String], value: Any?)] {
         switch kind {
-        case .parakeet:
-            guard choice.local else { return [] }
-            return TranscriptionChoice(cloud: choice.cloud, local: false, provider: choice.provider)
+        case .parakeet, .whisper, .gigaAM:
+            let deleted: String
+            switch kind {
+            case .parakeet: deleted = "parakeet"
+            case .whisper: deleted = "whisper"
+            case .gigaAM: deleted = "gigaam"
+            case .live: preconditionFailure("handled below")
+            }
+            guard choice.local, choice.localEngine == deleted else { return [] }
+            return TranscriptionChoice(
+                cloud: choice.cloud, local: false,
+                provider: choice.provider, localEngine: choice.localEngine)
                 .updates
         case .live:
             return liveEnabled ? [(["live_transcription", "enabled"], nil)] : []

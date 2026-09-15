@@ -35,6 +35,8 @@ struct ModelStorageTests {
     private static func storage(in root: URL) -> ModelStorage {
         ModelStorage(
             live: LiveTranscriptionModelStore(root: root.appendingPathComponent("live")),
+            whisper: WhisperModelStore(directory: root.appendingPathComponent("whisper")),
+            gigaAM: GigaAMModelStore(directory: root.appendingPathComponent("gigaam")),
             parakeetCache: { version in
                 root.appendingPathComponent(version == .v2 ? "parakeet-v2" : "parakeet-v3")
             })
@@ -59,7 +61,9 @@ struct ModelStorageTests {
         // Nothing downloaded at all: the configured version is still listed,
         // because its row is where a person reads that it isn't here.
         let empty = storage.all(configured: .v3)
-        #expect(empty.map(\.name) == ["parakeet v3", "NVIDIA nemotron"])
+        #expect(empty.map(\.name) == [
+            "parakeet v3", "Whisper large-v3-turbo", "GigaAM v3", "NVIDIA nemotron",
+        ])
         #expect(empty.allSatisfy { !$0.isDownloaded })
         #expect(storage.total(empty) == 0)
 
@@ -68,7 +72,10 @@ struct ModelStorageTests {
         _ = try Self.directory(root, "parakeet-v2", files: 2)
         _ = try Self.directory(root, "parakeet-v3", files: 4)
         let both = storage.all(configured: .v3)
-        #expect(both.map(\.name) == ["parakeet v3", "parakeet v2", "NVIDIA nemotron"])
+        #expect(both.map(\.name) == [
+            "parakeet v3", "parakeet v2", "Whisper large-v3-turbo", "GigaAM v3",
+            "NVIDIA nemotron",
+        ])
         #expect(storage.total(both) == 6 * 1024)
     }
 
@@ -77,7 +84,11 @@ struct ModelStorageTests {
         let root = try Self.temporary()
         defer { try? FileManager.default.removeItem(at: root) }
         let store = LiveTranscriptionModelStore(root: root.appendingPathComponent("live"))
-        let storage = ModelStorage(live: store, parakeetCache: { _ in root })
+        let storage = ModelStorage(
+            live: store,
+            whisper: WhisperModelStore(directory: root.appendingPathComponent("whisper")),
+            gigaAM: GigaAMModelStore(directory: root.appendingPathComponent("gigaam")),
+            parakeetCache: { _ in root })
 
         let variant = store.variantDirectory(language: "multilingual")
         try FileManager.default.createDirectory(at: variant, withIntermediateDirectories: true)
@@ -101,7 +112,8 @@ struct ModelStorageTests {
         let written = ModelStorage.updatesAfterDeleting(
             .parakeet, choice: cloudAndLocal, liveEnabled: false)
         #expect(written.map(\.path) == [
-            ["transcription", "enabled"], ["transcription", "engine"], ["transcription", "cloud"],
+            ["transcription", "enabled"], ["transcription", "engine"],
+            ["transcription", "cloud"], ["transcription", "local_engine"],
         ])
         // The cloud stays, so the engine stops being "whichever answers" and
         // becomes the one that is left.

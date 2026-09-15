@@ -193,17 +193,18 @@ actor TranscriptionCoordinator {
             // The network can go away between the reachability probe and the
             // upload. One retry on the local engine, so a dropped connection
             // costs minutes rather than the transcript.
-            guard Config.transcriptionEngine() == "auto",
+            guard Self.configuredEngine(for: dir) == "auto",
                   Platform.supportsLocalModels,
                   engineIsCloud(), Self.looksLikeNetworkTrouble(error)
             else { throw error }
-            let from = engine?.name ?? Config.transcriptionEngine()
+            let from = engine?.name ?? Self.configuredEngine(for: dir)
+            let local = Config.transcriptionLocalEngine()
             log(dir, "cloud transcription failed (\(error)) — retrying locally")
             await engine?.release()
-            engine = ParakeetEngine()
+            engine = Self.localEngine(named: local)
             Analytics.track(.transcriptFallback, [
                 .fromEngine: .text(from),
-                .toEngine: .text("parakeet"),
+                .toEngine: .text(local),
                 .reason: .text(Analytics.reason(for: error).rawValue),
             ])
             fallbackUsed = true
@@ -336,7 +337,7 @@ actor TranscriptionCoordinator {
         defer { SessionClaim.release(dir) }
 
         var meta = try SessionMeta.read(from: dir)
-        let engine = try await preparedEngine()
+        let engine = try await preparedEngine(for: dir)
 
         var audioDirectory = dir
         var cleaned: OfflineEchoAudio.Result?
@@ -384,7 +385,7 @@ actor TranscriptionCoordinator {
             // reads both tracks, and a raw mic recording through speakers has
             // their voice on it too. A diarizing engine sees the mix once, so
             // there's no duplicate for a filter to find.
-            if Config.transcriptEchoFilter() {
+            if Config.transcriptEchoFilter(), !meta.isSingleSource {
                 echoFilterRan = true
                 let before = merged.count
                 merged = cleaned == nil ? EchoFilter.dropEchoes(merged) : EchoFilter.dropResidualEchoes(merged)
@@ -397,7 +398,7 @@ actor TranscriptionCoordinator {
         case .multichannel:
             merged = try await transcribeMultichannel(audioDirectory, meta: meta, engine: engine)
             merged.sort { $0.start_ms < $1.start_ms }
-            if Config.transcriptEchoFilter() {
+            if Config.transcriptEchoFilter(), !meta.isSingleSource {
                 echoFilterRan = true
                 let before = merged.count
                 merged = cleaned == nil ? EchoFilter.dropEchoes(merged) : EchoFilter.dropResidualEchoes(merged)
@@ -456,6 +457,22 @@ actor TranscriptionCoordinator {
         meta: SessionMeta,
         engine: TranscriptionEngine
     ) async throws -> [Transcript.Segment] {
+        // An imported file has no "my side" and "their side" — it is one
+        // ordinary mixed recording. Hand its mono source to a diarizing engine
+        // as-is, and keep the engine's A/B labels rather than interpreting
+        // their first character as a channel number.
+        if meta.isSingleSource, let source = meta.tracks.first {
+            let audio = dir.appendingPathComponent(source.file)
+            log(dir, "transcribing \(source.file) (\(engine.name))")
+            return try await engine.transcribe(audio).map { segment in
+                Transcript.Segment(
+                    speaker: segment.speaker ?? "speaker",
+                    start_ms: Int(segment.start * 1000),
+                    end_ms: Int(segment.end * 1000),
+                    text: segment.text)
+            }
+        }
+
         let sharedArchive = meta.tracks.count == 2
             && meta.tracks.allSatisfy { $0.file == meta.tracks[0].file && $0.channel != nil }
         let audio = sharedArchive
@@ -557,12 +574,16 @@ actor TranscriptionCoordinator {
         meta: SessionMeta,
         engine: TranscriptionEngine
     ) async throws -> [Transcript.Segment] {
+        let importedSource = meta.isSingleSource
+            ? meta.tracks.first.map { dir.appendingPathComponent($0.file) }
+            : nil
         let sharedArchive = meta.tracks.count == 2
             && meta.tracks.allSatisfy { $0.file == meta.tracks[0].file && $0.channel != nil }
-        let mixed = sharedArchive
+        let mixed = importedSource ?? (sharedArchive
             ? dir.appendingPathComponent(meta.tracks[0].file)
-            : dir.appendingPathComponent(Self.mixedFile)
-        if !sharedArchive && !FileManager.default.fileExists(atPath: mixed.path) {
+            : dir.appendingPathComponent(Self.mixedFile))
+        if importedSource == nil, !sharedArchive,
+           !FileManager.default.fileExists(atPath: mixed.path) {
             log(dir, "mixing tracks → \(Self.mixedFile)")
             try await AudioMixer.mix(
                 meta.tracks.map {
@@ -608,14 +629,14 @@ actor TranscriptionCoordinator {
         }
     }
 
-    private func preparedEngine() async throws -> TranscriptionEngine {
+    private func preparedEngine(for session: URL) async throws -> TranscriptionEngine {
         if let engine { return engine }
         if let fixedEngine {
             try await fixedEngine.prepare()
             engine = fixedEngine
             return fixedEngine
         }
-        let configured = Config.transcriptionEngine()
+        let configured = Self.configuredEngine(for: session)
         if !Self.knownEngines.contains(configured) {
             FileHandle.standardError.write(Data(
                 "warning: unknown transcription engine \"\(configured)\" — choosing automatically\n".utf8
@@ -623,9 +644,9 @@ actor TranscriptionCoordinator {
         }
         let provider = Self.cloudProvider(configured: configured)
         let hasKey = Self.cloudKey(for: provider) != nil
-        if configured == "parakeet", !Platform.supportsLocalModels, hasKey {
+        if Config.localEngines.contains(configured), !Platform.supportsLocalModels, hasKey {
             FileHandle.standardError.write(Data(
-                "warning: parakeet needs Apple Silicon — transcribing with \(provider)\n".utf8
+                "warning: \(configured) needs Apple Silicon — transcribing with \(provider)\n".utf8
             ))
         }
         let engine: TranscriptionEngine
@@ -637,9 +658,12 @@ actor TranscriptionCoordinator {
         case .cloud:
             engine = try Self.cloudEngine(provider)
         case .local:
-            engine = ParakeetEngine()
+            let local = Config.localEngines.contains(configured)
+                ? configured : Config.transcriptionLocalEngine()
+            engine = Self.localEngine(named: local)
         case .cloudOrLocal:
-            engine = await Self.bestAvailableEngine(provider)
+            engine = await Self.bestAvailableEngine(
+                provider, local: Config.transcriptionLocalEngine())
         case .unavailable:
             throw EngineUnavailable.noLocalModels
         }
@@ -648,7 +672,16 @@ actor TranscriptionCoordinator {
         return engine
     }
 
-    private static let knownEngines: Set<String> = ["auto", "assemblyai", "openai", "parakeet"]
+    private static let knownEngines: Set<String> = Set(["auto"])
+        .union(Config.cloudEngines)
+        .union(Config.localEngines)
+
+    static func configuredEngine(for session: URL) -> String {
+        let requested = SessionState.value(
+            session, SessionState.Key.transcriptionEngine) as? String
+        return requested.flatMap { knownEngines.contains($0) ? $0 : nil }
+            ?? Config.transcriptionEngine()
+    }
 
     /// Which cloud service a configuration means. A configured engine naming
     /// a provider outright is that provider; anything else defers to the
@@ -667,6 +700,14 @@ actor TranscriptionCoordinator {
         provider == "openai"
             ? try OpenAITranscriptionEngine()
             : try AssemblyAIEngine()
+    }
+
+    private static func localEngine(named name: String) -> TranscriptionEngine {
+        if name == "whisper" {
+            return WhisperEngine(language: Config.transcriptionLanguage())
+        }
+        if name == "gigaam" { return GigaAMEngine() }
+        return ParakeetEngine()
     }
 
     /// Which engine the configuration adds up to, before the network is
@@ -694,7 +735,7 @@ actor TranscriptionCoordinator {
         if Config.cloudEngines.contains(configured) { return .cloud }
         // An explicit parakeet on a Mac that cannot run it is the one place
         // we override a stated preference — the alternative is no transcript.
-        if configured == "parakeet" {
+        if Config.localEngines.contains(configured) {
             if localModels { return .local }
             return hasKey ? .cloud : .unavailable
         }
@@ -721,14 +762,17 @@ actor TranscriptionCoordinator {
     /// Cloud when it's actually usable, local otherwise. Checked at the moment
     /// there is work rather than at launch, because the answer changes: the
     /// laptop that recorded a meeting on a train is transcribing it on a train.
-    private static func bestAvailableEngine(_ provider: String) async -> TranscriptionEngine {
+    private static func bestAvailableEngine(
+        _ provider: String,
+        local: String = Config.transcriptionLocalEngine()
+    ) async -> TranscriptionEngine {
         guard await cloudReachable(provider) else {
             FileHandle.standardError.write(Data(
-                "\(provider) unreachable — transcribing locally with parakeet\n".utf8
+                "\(provider) unreachable — transcribing locally with \(local)\n".utf8
             ))
-            return ParakeetEngine()
+            return localEngine(named: local)
         }
-        return (try? cloudEngine(provider)) ?? ParakeetEngine()
+        return (try? cloudEngine(provider)) ?? localEngine(named: local)
     }
 
     /// A short, cheap "is the API there" probe. Any HTTP answer counts,
@@ -794,6 +838,10 @@ private struct SessionMeta {
     let attendees: [String]
     let app: String?
 
+    var isSingleSource: Bool {
+        tracks.count == 1 && tracks[0].speaker == "speaker"
+    }
+
     func track(for speaker: String) -> Track? {
         tracks.first { $0.speaker == speaker }
     }
@@ -834,6 +882,13 @@ private struct SessionMeta {
                 speaker: "them",
                 offsetMs: offsets["system"] ?? 0,
                 channel: channels["system"]))
+        }
+        if let source = files["source"] {
+            tracks.append(Track(
+                file: source,
+                speaker: "speaker",
+                offsetMs: offsets["source"] ?? 0,
+                channel: channels["source"]))
         }
         let calendar = json["calendar"] as? [String: Any]
         return SessionMeta(

@@ -38,6 +38,7 @@ final class MenuBarController {
     var onToggleAutoRecord: (() -> Void)?
     var onOpenFolder: (() -> Void)?
     var onShowRecordings: (() -> Void)?
+    var onImport: (() -> Void)?
     var onShowWindow: (() -> Void)?
     var onShowSettings: (() -> Void)?
     var onShowSetup: (() -> Void)?
@@ -126,6 +127,13 @@ final class MenuBarController {
         )
         menu.addItem(recordings)
 
+        let importItem = NSMenuItem(
+            title: localised("Import…", "Импортировать…"),
+            action: #selector(importClicked),
+            keyEquivalent: "i"
+        )
+        menu.addItem(importItem)
+
         let settings = NSMenuItem(
             title: localised("Settings…", "Настройки…"),
             action: #selector(showSettingsClicked),
@@ -174,7 +182,7 @@ final class MenuBarController {
 
         for item in [
             toggleItem, pauseItem, autoRecordItem, showWindow, openFolder,
-            recordings, settings, setupItem, updatesItem, about, quit,
+            recordings, importItem, settings, setupItem, updatesItem, about, quit,
         ] {
             item.target = self
         }
@@ -236,6 +244,18 @@ final class MenuBarController {
     /// this is how anything outside asks which are on offer.
     var offeredItemTitles: [String] {
         menu.items.filter { !$0.isHidden }.map(\.title)
+    }
+
+    /// Drive one of the visible commands. Besides making the status menu
+    /// inspectable without exposing its whole mutable NSMenu, this mirrors
+    /// exactly what AppKit does when a person clicks the item.
+    @discardableResult
+    func performOfferedItem(titled title: String) -> Bool {
+        guard let item = menu.items.first(where: { !$0.isHidden && $0.title == title }) else {
+            return false
+        }
+        guard let action = item.action else { return false }
+        return NSApplication.shared.sendAction(action, to: item.target, from: item)
     }
 
     /// What the item says beside its icon in the menu bar, which is words as
@@ -316,6 +336,7 @@ final class MenuBarController {
     @objc private func showSetupClicked() { onShowSetup?() }
     @objc private func openFolderClicked() { onOpenFolder?() }
     @objc private func showRecordingsClicked() { onShowRecordings?() }
+    @objc private func importClicked() { onImport?() }
     @objc private func checkForUpdatesClicked() { onCheckForUpdates?() }
     @objc private func showAboutClicked() { onShowAbout?() }
     @objc private func quitClicked() { onQuit?() }

@@ -351,7 +351,8 @@ final class SettingsWindow: NSObject, NSTextFieldDelegate {
 
         let size = NSTextField(labelWithString: model.isDownloaded
             ? ModelStorage.describe(bytes: model.bytes)
-            : localised("not downloaded", "не скачана"))
+            : localised("not downloaded · about ", "не скачана · около ")
+                + ModelStorage.describe(bytes: model.advertisedBytes))
         size.textColor = model.isDownloaded ? .labelColor : .secondaryLabelColor
         size.alignment = .right
 
@@ -371,8 +372,8 @@ final class SettingsWindow: NSObject, NSTextFieldDelegate {
         line.alignment = .firstBaseline
         line.spacing = 10
         NSLayoutConstraint.activate([
-            name.widthAnchor.constraint(equalToConstant: 260),
-            size.widthAnchor.constraint(equalToConstant: 110),
+            name.widthAnchor.constraint(equalToConstant: 190),
+            size.widthAnchor.constraint(equalToConstant: 190),
         ])
 
         let help = NSTextField(labelWithString: Self.purpose(of: model.kind))
@@ -398,6 +399,14 @@ final class SettingsWindow: NSObject, NSTextFieldDelegate {
             return localised(
                 "Transcribes on this Mac, after the meeting.",
                 "Расшифровывает на этом маке, после встречи.")
+        case .whisper:
+            return localised(
+                "Local multilingual transcription with whisper.cpp.",
+                "Локальная многоязычная расшифровка через whisper.cpp.")
+        case .gigaAM:
+            return localised(
+                "Local Russian transcription with transcribe.cpp.",
+                "Локальная русская расшифровка через transcribe.cpp.")
         case .live:
             return localised(
                 "The live transcript shown during a meeting.",
@@ -426,7 +435,8 @@ final class SettingsWindow: NSObject, NSTextFieldDelegate {
             engine: Config.transcriptionEngine(),
             cloudProvider: Config.transcriptionCloudProvider(),
             enabled: Config.transcriptionEnabled(),
-            localModels: Platform.supportsLocalModels)
+            localModels: Platform.supportsLocalModels,
+            localEngine: Config.transcriptionLocalEngine())
         let updates = ModelStorage.updatesAfterDeleting(
             model.kind, choice: choice, liveEnabled: Config.liveTranscriptionEnabled())
 
@@ -476,13 +486,14 @@ final class SettingsWindow: NSObject, NSTextFieldDelegate {
                 "Скачается снова, если её опять включить.")
         }
         switch model.kind {
-        case .parakeet where choice.cloud:
-            return freed + localised(
-                "Transcribing on this Mac goes off with it, so meetings go to "
-                    + "\(TranscriptionChoice.displayName(choice.provider)) instead.",
-                "Расшифровка на этом маке выключится, и встречи пойдут "
-                    + "в \(TranscriptionChoice.displayName(choice.provider)).")
-        case .parakeet:
+        case .parakeet, .whisper, .gigaAM:
+            if choice.cloud {
+                return freed + localised(
+                    "Transcribing on this Mac goes off with it, so meetings go to "
+                        + "\(TranscriptionChoice.displayName(choice.provider)) instead.",
+                    "Расшифровка на этом маке выключится, и встречи пойдут "
+                        + "в \(TranscriptionChoice.displayName(choice.provider)).")
+            }
             return freed + localised(
                 "Nothing else is set up to transcribe, so transcription goes off "
                     + "entirely — otherwise the model comes back at the next meeting.",
@@ -514,7 +525,7 @@ final class SettingsWindow: NSObject, NSTextFieldDelegate {
 
         let line = NSStackView(views: [label, control])
         line.orientation = .horizontal
-        line.alignment = .firstBaseline
+        line.alignment = entry.kind.isMultiline ? .top : .firstBaseline
         line.spacing = 10
 
         // A toggle is a small thing on the right of a wide label; a text field
@@ -578,6 +589,19 @@ final class SettingsWindow: NSObject, NSTextFieldDelegate {
             field.target = self
             field.action = #selector(controlChanged(_:))
             return field
+
+        case .multilineText:
+            let field = NSTextField()
+            field.usesSingleLineMode = false
+            field.lineBreakMode = .byWordWrapping
+            field.maximumNumberOfLines = 14
+            field.cell?.wraps = true
+            field.cell?.isScrollable = false
+            field.delegate = self
+            field.target = self
+            field.action = #selector(controlChanged(_:))
+            field.heightAnchor.constraint(equalToConstant: 210).isActive = true
+            return field
         }
     }
 
@@ -600,6 +624,9 @@ final class SettingsWindow: NSObject, NSTextFieldDelegate {
                 row.control.stringValue = items.joined(separator: ", ")
             case .number, .text:
                 row.control.stringValue = stored.map { "\($0)" } ?? ""
+            case .multilineText:
+                row.control.stringValue = stored as? String
+                    ?? row.entry.defaultValue as? String ?? ""
             }
         }
         showStrayKeys(in: config)
@@ -629,6 +656,22 @@ final class SettingsWindow: NSObject, NSTextFieldDelegate {
         commit(rows[field.tag])
     }
 
+    /// `NSTextField` normally treats Return as "finish editing", even when
+    /// it wraps. The summary prompt is prose, so Return has to remain a real
+    /// newline while leaving the field still commits in the usual way.
+    func control(
+        _ control: NSControl,
+        textView: NSTextView,
+        doCommandBy commandSelector: Selector
+    ) -> Bool {
+        guard rows.indices.contains(control.tag),
+              rows[control.tag].entry.kind.isMultiline,
+              commandSelector == #selector(NSResponder.insertNewline(_:))
+        else { return false }
+        textView.insertNewlineIgnoringFieldEditor(nil)
+        return true
+    }
+
     private func commit(_ row: Row) {
         let entry = row.entry
         let input: SettingsSchema.Input
@@ -637,7 +680,7 @@ final class SettingsWindow: NSObject, NSTextFieldDelegate {
             input = .flag((row.control as? NSSwitch)?.state == .on)
         case .choice:
             input = .choice((row.control as? NSPopUpButton)?.titleOfSelectedItem ?? "")
-        case .number, .text, .list:
+        case .number, .text, .multilineText, .list:
             input = .text(row.control.stringValue)
         }
 

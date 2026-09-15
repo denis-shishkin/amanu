@@ -99,6 +99,18 @@ struct StatusWindowLayoutTests {
         window.updateTranscription("transcribing 2026.08.21-1000")
         check(window, panel, "recording while transcribing")
 
+        // Import adds another live row, first indeterminate and then with a
+        // measured fraction. It must grow the compact window instead of
+        // drawing across the buttons below it.
+        window.updateImport(.init(
+            source: URL(fileURLWithPath: "/tmp/interview.mov"),
+            index: 1, total: 2, stage: .checking, fraction: nil))
+        check(window, panel, "recording while checking an import")
+        window.updateImport(.init(
+            source: URL(fileURLWithPath: "/tmp/interview.mov"),
+            index: 1, total: 2, stage: .normalizing, fraction: 0.5))
+        check(window, panel, "recording while converting an import")
+
         // The transcript borrowing the height, and giving it back.
         window.updateLive(.init(
             isRecording: true, isEnabled: true, entries: [speech], status: .live))

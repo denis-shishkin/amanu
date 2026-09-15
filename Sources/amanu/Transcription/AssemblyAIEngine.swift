@@ -93,6 +93,8 @@ actor AssemblyAIEngine: TranscriptionEngine {
 
     func transcribe(_ audio: URL) async throws -> [TranscriptSegment] {
         let audioDuration = try await Self.audioDuration(of: audio)
+        let channels = (try? AVAudioFile(forReading: audio))?
+            .processingFormat.channelCount ?? 1
         let cache = Self.cacheURL(for: audio)
 
         let response: TranscriptResponse
@@ -103,7 +105,7 @@ actor AssemblyAIEngine: TranscriptionEngine {
             response = decoded
         } else {
             let uploadURL = try await upload(audio)
-            let id = try await submit(audioURL: uploadURL)
+            let id = try await submit(audioURL: uploadURL, multichannel: channels > 1)
             note("submitted \(id)")
             let (decoded, raw) = try await poll(id: id)
             try? raw.write(to: cache, options: .atomic)
@@ -183,11 +185,12 @@ actor AssemblyAIEngine: TranscriptionEngine {
         return try JSONDecoder().decode(UploadResponse.self, from: data).upload_url
     }
 
-    private func submit(audioURL: String) async throws -> String {
+    private func submit(audioURL: String, multichannel: Bool) async throws -> String {
         let body = Self.requestBody(
             audioURL: audioURL,
             expectedLanguages: expected,
-            speechModel: speechModel)
+            speechModel: speechModel,
+            multichannel: multichannel)
 
         var request = URLRequest(url: Self.base.appendingPathComponent("transcript"))
         request.httpMethod = "POST"
@@ -206,11 +209,11 @@ actor AssemblyAIEngine: TranscriptionEngine {
     static func requestBody(
         audioURL: String,
         expectedLanguages: [String],
-        speechModel: String?
+        speechModel: String?,
+        multichannel: Bool = true
     ) -> [String: Any] {
         var body: [String: Any] = [
             "audio_url": audioURL,
-            "multichannel": true,
             "speaker_labels": true,
             "punctuate": true,
             "format_text": true,
@@ -218,6 +221,7 @@ actor AssemblyAIEngine: TranscriptionEngine {
             // speakers_expected is deliberately unset — with multichannel,
             // any hint applies independently to every channel.
         ]
+        if multichannel { body["multichannel"] = true }
         if let primary = expectedLanguages.first {
             body["language_detection_options"] = [
                 "expected_languages": expectedLanguages,

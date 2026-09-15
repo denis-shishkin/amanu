@@ -30,7 +30,7 @@ BUILT = $(shell swift build -c release --arch arm64 --arch x86_64 --show-bin-pat
 # nothing here.
 APP        = .build/Amanu.app
 APP_NAME   = Amanu
-VERSION   ?= 0.4.22
+VERSION   ?= 0.4.23
 MINIMUM_MACOS ?= 14.2
 # A build number that only ever goes up, and says which commit it was.
 BUILD     ?= $(shell git rev-list --count HEAD 2>/dev/null || echo 1)
@@ -50,6 +50,10 @@ DMG        = $(DIST)/amanu-v$(VERSION)-macos-universal.dmg
 # fine here and only fail to launch on the Macs this build exists for.
 SPARKLE_FW = $(shell find .build/artifacts/sparkle -type d -name Sparkle.framework \
 	-path '*macos-arm64_x86_64*' 2>/dev/null | head -1)
+WHISPER_FW = $(shell find .build/artifacts/amanu/WhisperFramework -type d \
+	-name whisper.framework -path '*macos-arm64_x86_64*' 2>/dev/null | head -1)
+TRANSCRIBE_FW = $(shell find .build/artifacts/amanu/TranscribeCppFramework -type d \
+	-name CTranscribe.framework -path '*macos-arm64_x86_64*' 2>/dev/null | head -1)
 LOCALVQE_ROOT = .build/localvqe
 LOCALVQE_LIB = $(LOCALVQE_ROOT)/lib/liblocalvqe.dylib
 LOCALVQE_MODEL = $(LOCALVQE_ROOT)/model/localvqe-v1.4-aec-200K-f32.gguf
@@ -118,15 +122,43 @@ app: build $(ICON)
 		$(APP)/Contents/Resources/Licenses/Sparkle-LICENSE
 	@cp .build/checkouts/Sparkle/Vendor/ed25519-sparkle/license.txt \
 		$(APP)/Contents/Resources/Licenses/Sparkle-ed25519-LICENSE.txt
+	@cp Resources/Licenses/whisper.cpp-LICENSE \
+		$(APP)/Contents/Resources/Licenses/whisper.cpp-LICENSE
+	@cp Resources/Licenses/transcribe.cpp-LICENSE \
+		$(APP)/Contents/Resources/Licenses/transcribe.cpp-LICENSE
+	@cp Resources/Licenses/transcribe.cpp-ggml-LICENSE \
+		$(APP)/Contents/Resources/Licenses/transcribe.cpp-ggml-LICENSE
+	@cp Resources/Licenses/transcribe.cpp-miniz-LICENSE \
+		$(APP)/Contents/Resources/Licenses/transcribe.cpp-miniz-LICENSE
 	@test -s $(APP)/Contents/Resources/LICENSE \
 		&& test -s $(APP)/Contents/Resources/Amanu.icns \
 		&& test -s $(APP)/Contents/Resources/Assets.car \
 		&& test -s $(APP)/Contents/Resources/THIRD-PARTY-NOTICES.md \
 		&& test -s $(APP)/Contents/Resources/Models/localvqe-v1.4-aec-200K-f32.gguf \
 		&& test -s $(APP)/Contents/Resources/LocalVQE-verification.json \
-		&& test "$$(find $(APP)/Contents/Resources/Licenses -type f | wc -l | tr -d ' ')" = 8
+		&& test "$$(find $(APP)/Contents/Resources/Licenses -type f | wc -l | tr -d ' ')" = 12
 	@test -n "$(SPARKLE_FW)" || (echo "Sparkle.framework not found — run swift build first"; exit 1)
+	@test -n "$(WHISPER_FW)" || (echo "whisper.framework not found — run swift build first"; exit 1)
+	@test -n "$(TRANSCRIBE_FW)" || (echo "CTranscribe.framework not found — run swift build first"; exit 1)
 	@cp -R "$(SPARKLE_FW)" $(APP)/Contents/Frameworks/
+	@cp -R "$(WHISPER_FW)" $(APP)/Contents/Frameworks/
+	@cp -R "$(TRANSCRIBE_FW)" $(APP)/Contents/Frameworks/
+	@# transcribe.cpp 0.2.0 ships the macOS framework with duplicated top-level
+	@# files and a duplicated Versions/Current directory. codesign correctly
+	@# rejects that as an ambiguous bundle, so restore the canonical framework
+	@# symlink layout in the copy we distribute.
+	@rm -rf \
+		$(APP)/Contents/Frameworks/CTranscribe.framework/Versions/Current \
+		$(APP)/Contents/Frameworks/CTranscribe.framework/CTranscribe \
+		$(APP)/Contents/Frameworks/CTranscribe.framework/Headers \
+		$(APP)/Contents/Frameworks/CTranscribe.framework/Modules \
+		$(APP)/Contents/Frameworks/CTranscribe.framework/Resources
+	@ln -s A $(APP)/Contents/Frameworks/CTranscribe.framework/Versions/Current
+	@ln -s Versions/Current/CTranscribe $(APP)/Contents/Frameworks/CTranscribe.framework/CTranscribe
+	@ln -s Versions/Current/Headers $(APP)/Contents/Frameworks/CTranscribe.framework/Headers
+	@ln -s Versions/Current/Modules $(APP)/Contents/Frameworks/CTranscribe.framework/Modules
+	@ln -s Versions/Current/Resources $(APP)/Contents/Frameworks/CTranscribe.framework/Resources
+	@test -L $(APP)/Contents/Frameworks/CTranscribe.framework/Versions/Current
 	@# Sparkle's XPC services exist so a sandboxed app can still download and
 	@# install; amanu is not sandboxed, so they are two more binaries to sign,
 	@# notarize and ship for nothing.
@@ -139,6 +171,8 @@ app: build $(ICON)
 	@# shows up as a Gatekeeper rejection on someone else's Mac, not here.
 	@for nested in \
 		$(APP)/Contents/Frameworks/liblocalvqe.dylib \
+		$(APP)/Contents/Frameworks/whisper.framework \
+		$(APP)/Contents/Frameworks/CTranscribe.framework \
 		$(APP)/Contents/Frameworks/Sparkle.framework/Versions/B/Autoupdate \
 		$(APP)/Contents/Frameworks/Sparkle.framework/Versions/B/Updater.app \
 		$(APP)/Contents/Frameworks/Sparkle.framework ; do \
@@ -165,6 +199,12 @@ app: build $(ICON)
 	@lipo -archs $(APP)/Contents/Frameworks/liblocalvqe.dylib | grep -q x86_64 \
 		&& lipo -archs $(APP)/Contents/Frameworks/liblocalvqe.dylib | grep -q arm64 \
 		|| (echo "LocalVQE not universal: $$(lipo -archs $(APP)/Contents/Frameworks/liblocalvqe.dylib)"; exit 1)
+	@lipo -archs $(APP)/Contents/Frameworks/whisper.framework/Versions/A/whisper | grep -q x86_64 \
+		&& lipo -archs $(APP)/Contents/Frameworks/whisper.framework/Versions/A/whisper | grep -q arm64 \
+		|| (echo "whisper.framework not universal: $$(lipo -archs $(APP)/Contents/Frameworks/whisper.framework/Versions/A/whisper)"; exit 1)
+	@lipo -archs $(APP)/Contents/Frameworks/CTranscribe.framework/Versions/A/CTranscribe | grep -q x86_64 \
+		&& lipo -archs $(APP)/Contents/Frameworks/CTranscribe.framework/Versions/A/CTranscribe | grep -q arm64 \
+		|| (echo "CTranscribe.framework not universal: $$(lipo -archs $(APP)/Contents/Frameworks/CTranscribe.framework/Versions/A/CTranscribe)"; exit 1)
 	@python3 scripts/verify-macos-compatibility.py $(APP) $(MINIMUM_MACOS)
 	@echo "built → $(APP) ($(VERSION) build $(BUILD)) · $$(lipo -archs $(APP)/Contents/MacOS/$(APP_NAME))"
 

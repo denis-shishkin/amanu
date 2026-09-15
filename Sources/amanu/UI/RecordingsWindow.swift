@@ -10,6 +10,22 @@ import AppKit
 /// purpose, and this is where somebody who was there fills it in.
 @MainActor
 final class RecordingsWindow: NSObject {
+    struct RetranscriptionEngine {
+        let id: String
+        let title: String
+    }
+
+    static var retranscriptionEngines: [RetranscriptionEngine] { [
+        .init(id: "parakeet", title: "Parakeet"),
+        .init(id: "whisper", title: "Whisper"),
+        .init(id: "gigaam", title: "GigaAM"),
+        .init(id: "assemblyai", title: "AssemblyAI"),
+        .init(id: "openai", title: "OpenAI"),
+    ] }
+
+    var onImportFiles: (([URL]) -> Void)?
+    var onCancelImport: (() -> Void)?
+    var onChooseImport: (() -> Void)?
     private let root: URL
     private let panel: NSWindow
     private let table = NSTableView()
@@ -22,7 +38,10 @@ final class RecordingsWindow: NSObject {
     private let retranscribeButton = NSButton()
     private let openFolderButton = NSButton()
     private let deleteButton = NSButton()
+    private let importButton = NSButton()
     private let busyLabel = NSTextField(labelWithString: "")
+    private let importStatus = MediaImportStatusView()
+    private let retranscriptionMenu = NSMenu()
 
     private var items: [SessionInventory.Item] = []
     private var selected: SessionInventory.Item? {
@@ -104,6 +123,16 @@ final class RecordingsWindow: NSObject {
         table.delegate = self
         table.target = self
         table.doubleAction = #selector(openFolderClicked)
+        retranscriptionMenu.delegate = self
+        for engine in Self.retranscriptionEngines {
+            let item = NSMenuItem(
+                title: localised("Re-transcribe with ", "Расшифровать через ") + engine.title,
+                action: #selector(retranscribeWithEngine(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = engine.id
+            retranscriptionMenu.addItem(item)
+        }
+        table.menu = retranscriptionMenu
 
         scroll.documentView = table
         scroll.hasVerticalScroller = true
@@ -129,6 +158,7 @@ final class RecordingsWindow: NSObject {
         speakersStack.spacing = 6
 
         for (button, title, action) in [
+            (importButton, localised("Import…", "Импортировать…"), #selector(chooseImportClicked)),
             (finishButton, localised("Finish processing", "Доделать"), #selector(finishClicked)),
             (retranscribeButton,
              localised("Re-transcribe", "Расшифровать заново"), #selector(retranscribeClicked)),
@@ -140,9 +170,10 @@ final class RecordingsWindow: NSObject {
             button.target = self
             button.action = action
         }
+        importButton.identifier = NSUserInterfaceItemIdentifier("choose-media-import")
 
         let buttons = NSStackView(views: [
-            finishButton, retranscribeButton, openFolderButton, deleteButton, busyLabel,
+            importButton, finishButton, retranscribeButton, openFolderButton, deleteButton, busyLabel,
         ])
         buttons.orientation = .horizontal
         buttons.spacing = 8
@@ -160,8 +191,9 @@ final class RecordingsWindow: NSObject {
             speakersStack.topAnchor.constraint(equalTo: detailScroll.contentView.topAnchor),
         ])
 
+        importStatus.onCancel = { [weak self] in self?.onCancelImport?() }
         let content = NSStackView(views: [
-            scroll, detailTitle, openingLabel, detailScroll, buttons,
+            scroll, importStatus, detailTitle, openingLabel, detailScroll, buttons,
         ])
         content.orientation = .vertical
         content.alignment = .leading
@@ -169,7 +201,8 @@ final class RecordingsWindow: NSObject {
         content.edgeInsets = NSEdgeInsets(top: 12, left: 14, bottom: 12, right: 14)
         content.translatesAutoresizingMaskIntoConstraints = false
 
-        let container = NSView()
+        let container = MediaDropView()
+        container.onFiles = { [weak self] urls in self?.onImportFiles?(urls) }
         container.addSubview(content)
         NSLayoutConstraint.activate([
             content.topAnchor.constraint(equalTo: container.topAnchor),
@@ -177,10 +210,20 @@ final class RecordingsWindow: NSObject {
             content.leadingAnchor.constraint(equalTo: container.leadingAnchor),
             content.trailingAnchor.constraint(equalTo: container.trailingAnchor),
             scroll.widthAnchor.constraint(equalTo: content.widthAnchor, constant: -28),
+            importStatus.widthAnchor.constraint(equalTo: content.widthAnchor, constant: -28),
             openingLabel.widthAnchor.constraint(equalTo: content.widthAnchor, constant: -28),
             detailScroll.widthAnchor.constraint(equalTo: content.widthAnchor, constant: -28),
         ])
         return container
+    }
+
+    func updateImport(_ update: MediaImportCoordinator.Update) {
+        importStatus.update(update)
+    }
+
+    func finishImport(_ result: MediaImportCoordinator.Result) {
+        importStatus.finish(result)
+        reload()
     }
 
     // MARK: - data
@@ -288,6 +331,14 @@ final class RecordingsWindow: NSObject {
         busyLabel.stringValue = working ? localised("working…", "работаю…") : ""
     }
 
+    /// The row-level action belongs only beside a failed transcript whose
+    /// source audio still exists. A generic action column would put buttons
+    /// beside healthy rows and make the failure harder, not easier, to act on.
+    static func inlineRetranscribeTitle(for item: SessionInventory.Item) -> String? {
+        guard case .failed = item.transcript, item.hasAudio else { return nil }
+        return localised("Re-transcribe", "Расшифровать заново")
+    }
+
     // MARK: - actions
 
     @objc private func nameEdited(_ sender: NSTextField) {
@@ -393,6 +444,14 @@ final class RecordingsWindow: NSObject {
     /// asks first — and says what survives, because the answer ("the audio")
     /// is the part that makes it safe.
     @objc private func retranscribeClicked() {
+        confirmRetranscription(engine: nil)
+    }
+
+    @objc private func retranscribeWithEngine(_ sender: NSMenuItem) {
+        confirmRetranscription(engine: sender.representedObject as? String)
+    }
+
+    private func confirmRetranscription(engine: String?) {
         guard let item = selected, item.hasAudio else { return }
         let alert = NSAlert()
         alert.messageText = localised(
@@ -411,10 +470,26 @@ final class RecordingsWindow: NSObject {
         alert.addButton(withTitle: localised("Cancel", "Отмена"))
         guard alert.runModal() == .alertFirstButtonReturn else { return }
 
-        PostProcessor.markForRetranscription(item.dir)
+        Self.markForRetranscription(item.dir, engine: engine)
         onRetranscribe?(item.dir)
         reload()
     }
+
+    static func markForRetranscription(_ dir: URL, engine: String?) {
+        if let engine {
+            SessionState.update(dir, with: [SessionState.Key.transcriptionEngine: engine])
+        }
+        PostProcessor.markForRetranscription(dir)
+    }
+
+    @objc private func inlineRetranscribeClicked(_ sender: NSButton) {
+        guard sender.tag >= 0, sender.tag < items.count else { return }
+        table.selectRowIndexes(IndexSet(integer: sender.tag), byExtendingSelection: false)
+        showDetail()
+        retranscribeClicked()
+    }
+
+    @objc private func chooseImportClicked() { onChooseImport?() }
 
     @objc private func openFolderClicked() {
         guard let item = selected else { return }
@@ -456,7 +531,12 @@ final class RecordingsWindow: NSObject {
     var onRetranscribe: ((URL) -> Void)?
 }
 
-extension RecordingsWindow: NSTableViewDataSource, NSTableViewDelegate {
+extension RecordingsWindow: NSTableViewDataSource, NSTableViewDelegate, NSMenuDelegate {
+    func menuWillOpen(_ menu: NSMenu) {
+        let enabled = selected?.hasAudio == true && !working
+        for item in menu.items { item.isEnabled = enabled }
+    }
+
     func numberOfRows(in tableView: NSTableView) -> Int { items.count }
 
     func tableView(
@@ -466,6 +546,35 @@ extension RecordingsWindow: NSTableViewDataSource, NSTableViewDelegate {
     ) -> Any? {
         guard row < items.count, let column = tableColumn?.identifier.rawValue else { return nil }
         return Self.cell(items[row], column: column)
+    }
+
+    func tableView(
+        _ tableView: NSTableView,
+        viewFor tableColumn: NSTableColumn?,
+        row: Int
+    ) -> NSView? {
+        guard row < items.count, let column = tableColumn?.identifier.rawValue else { return nil }
+        let item = items[row]
+        let label = NSTextField(labelWithString: Self.cell(item, column: column) ?? "")
+        label.lineBreakMode = .byTruncatingTail
+
+        guard column == "transcript", let title = Self.inlineRetranscribeTitle(for: item) else {
+            return label
+        }
+
+        let retry = NSButton(
+            title: title, target: self, action: #selector(inlineRetranscribeClicked(_:)))
+        retry.bezelStyle = .rounded
+        retry.controlSize = .mini
+        retry.tag = row
+
+        let cell = NSStackView(views: [label, retry])
+        cell.orientation = .horizontal
+        cell.alignment = .centerY
+        cell.spacing = 6
+        label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        retry.setContentCompressionResistancePriority(.required, for: .horizontal)
+        return cell
     }
 
     func tableViewSelectionDidChange(_ notification: Notification) {

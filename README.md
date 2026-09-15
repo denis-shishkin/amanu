@@ -44,7 +44,7 @@ meeting without sending its contents anywhere:
 
 - Parakeet provides local transcription on Apple Silicon.
 - The optional live transcript uses a separate on-device model.
-- Ollama can write summaries locally.
+- Ollama can write summaries locally when its Base URL is localhost/loopback.
 
 Cloud models are available when quality or convenience matters more than
 staying entirely offline. AssemblyAI and OpenAI can transcribe; Claude Code,
@@ -57,7 +57,8 @@ There is no Amanu account and no hosted meeting library. No meeting content
 leaves the Mac unless you choose a cloud transcription or summary backend.
 Cloud and CLI summary backends receive the transcript plus available meeting
 context such as its title and calendar participants; Ollama keeps that work on
-the Mac. The complete data-flow description is in the [privacy notice](PRIVACY.md).
+the Mac when it is configured with a localhost/loopback Base URL. The complete
+data-flow description is in the [privacy notice](PRIVACY.md).
 Work that cannot run without a network is marked as deferred and resumed later
 instead of being silently dropped.
 
@@ -242,7 +243,12 @@ only values that differ from the defaults. A compact example:
 - `recordings_dir` selects the session folder; `keep_audio` retains the compact
   stereo archive after a successful transcript; `on_stop` is a shell command
   run after processing; `analytics` controls anonymous product-usage reporting.
-- `transcription.*` covers `enabled`, `engine`, `cloud`, `model`, and `language`.
+- `transcription.*` covers `enabled`, `engine`, `cloud`, `local_engine`, `model`, and `language`.
+  `local_engine` is `parakeet` by default, `whisper`, or `gigaam`; Whisper
+  downloads about 550 MB once. GigaAM v3 downloads about 260 MB and runs
+  locally through Handy's `transcribe.cpp` Metal/CPU runtime. It is Russian-only;
+  Amanu splits long recordings into 20-second pieces to stay inside its trained
+  utterance window.
   Provider overrides are `transcription.openai.model`,
   `transcription.assemblyai.api_key`,
   `transcription.assemblyai.api_key_path`, and
@@ -253,7 +259,11 @@ only values that differ from the defaults. A compact example:
   `max_duration_minutes`, `silence_stop_minutes`, `apps`, and `ignore_apps`.
 - `speaker_names.*` covers `enabled`, `backend`, and `model`.
 - `summary.*` covers `enabled`, `backend`, `language`, `model`,
-  `openai_model`, `ollama_model`, `api_key_path`, and `openai_api_key_path`.
+  `openai_model`, `openai_base_url`, `ollama_model`, `ollama_base_url`,
+  `template`, `api_key_path`, and `openai_api_key_path`. The two Base URLs
+  allow OpenAI-compatible servers and a non-default Ollama host; only a
+  loopback Ollama URL keeps the transcript on this Mac. `template` contains
+  the complete summary instructions and starts with Amanu's built-in default.
 - `mic_voice_processing` enables Apple's capture-time voice processing;
   `offline_echo_cancellation` (on by default) instead cleans a copy of the mic
   after recording, using system audio as the playback reference. It never

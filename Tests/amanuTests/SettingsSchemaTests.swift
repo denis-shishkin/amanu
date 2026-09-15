@@ -133,6 +133,43 @@ struct SettingsSchemaTests {
         #expect(Self.stored(.text(" 30 "), delay) as? Int == 30)
     }
 
+    @Test("A custom summary template is read and the built-in template remains the default")
+    func summaryTemplateSetting() {
+        #expect(Config.summary(in: nil).template == SummaryTemplate.default)
+        #expect(Config.summary(in: [
+            "summary": ["template": "## My format\nOnly decisions."],
+        ]).template == "## My format\nOnly decisions.")
+    }
+
+    @Test("Summary API base URLs have safe defaults and accept compatible servers")
+    func summaryBaseURLs() {
+        let defaults = Config.summary(in: nil)
+        #expect(defaults.openAIBaseURL == "https://api.openai.com/v1")
+        #expect(defaults.ollamaBaseURL == "http://127.0.0.1:11434")
+
+        let custom = Config.summary(in: ["summary": [
+            "openai_base_url": "https://llm.example/v1/",
+            "ollama_base_url": "http://studio.local:11434/",
+        ]])
+        #expect(custom.openAIBaseURL == "https://llm.example/v1/")
+        #expect(custom.ollamaBaseURL == "http://studio.local:11434/")
+    }
+
+    @Test("The summary template is an editable multi-line Advanced setting")
+    func summaryTemplateAppearsInAdvanced() throws {
+        let summaries = try #require(
+            SettingsSchema.sections.first { $0.title == localised("Summaries", "Саммари") })
+        let template = try #require(
+            summaries.entries.first { $0.path == ["summary", "template"] })
+        guard case .multilineText = template.kind else {
+            Issue.record("summary.template should be a multi-line field")
+            return
+        }
+        #expect(template.defaultValue as? String == SummaryTemplate.default)
+        #expect(SettingsSchema.advancedSections
+            .flatMap(\.entries).contains { $0.path == ["summary", "template"] })
+    }
+
     /// The field would otherwise write 0, or an empty key, and the recorder
     /// would wait zero seconds before deciding a mic blip was a meeting.
     @Test("Letters in a number field change nothing")
@@ -161,7 +198,7 @@ struct SettingsSchemaTests {
         #expect(!keys.isEmpty)
     }
 
-    /// The eleven settings the setup form asks in full, and therefore the eleven
+    /// The settings the setup form asks in full, and therefore the ones
     /// the Advanced tab leaves out. Written down rather than derived, because
     /// there is nothing to derive it from: setup asks these through cards,
     /// switches and an open panel, in its own vocabulary, and no signature in
@@ -188,6 +225,8 @@ struct SettingsSchemaTests {
             "transcription.engine",
             // The AssemblyAI and OpenAI cards under the cloud switch.
             "transcription.cloud",
+            // The local-engine picker beside the local switch.
+            "transcription.local_engine",
             // The live-transcript switch — Apple Silicon only, on both sides.
             "live_transcription.enabled",
             // Files: the switch, and the folder chosen with an open panel.
@@ -286,6 +325,9 @@ struct SettingsSchemaTests {
                 "model": "claude-opus-5",
                 "openai_model": "gpt-5",
                 "ollama_model": "qwen3:8b",
+                "openai_base_url": "https://llm.example/v1",
+                "ollama_base_url": "http://127.0.0.1:11434",
+                "template": "## Decisions",
                 "api_key_path": "~/.config/anthropic/token",
                 "openai_api_key_path": "~/.config/openai/token",
             ],
@@ -363,12 +405,24 @@ struct SettingsSchemaTests {
                     let value = entry.defaultValue as? String
                     #expect(value != nil && options.contains(value!),
                             "\(entry.path) default isn't one of its options")
-                case .text, .list:
+                case .text, .multilineText, .list:
                     #expect(entry.defaultValue is String,
                             "\(entry.path) default should be shown as text")
                 }
             }
         }
+    }
+
+    @Test("GigaAM is a configurable local transcription engine")
+    func gigaAMIsInLocalEngineChoices() throws {
+        let entry = try #require(SettingsSchema.sections
+            .flatMap(\.entries)
+            .first { $0.path == ["transcription", "local_engine"] })
+        guard case .choice(let options) = entry.kind else {
+            Issue.record("transcription.local_engine must be a choice")
+            return
+        }
+        #expect(options.contains("gigaam"))
     }
 }
 
@@ -394,7 +448,7 @@ struct SettingsWindowTests {
                 let popup = control as? NSPopUpButton
                 #expect(popup != nil, "\(entry.path) should be a pop-up")
                 #expect(popup?.itemTitles == options, "\(entry.path) is missing options")
-            case .number, .text, .list:
+            case .number, .text, .multilineText, .list:
                 #expect(control is NSTextField, "\(entry.path) should be a text field")
             }
         }
@@ -412,11 +466,31 @@ struct SettingsWindowTests {
         for (entry, control) in zip(SettingsSchema.advancedSections.flatMap(\.entries),
                                     window.renderedControls) {
             guard let field = control as? NSTextField else { continue }
+            if case .multilineText = entry.kind {
+                #expect(field.stringValue == SettingsSchema.describeDefault(entry),
+                        "\(entry.path) doesn't start with its editable default")
+                continue
+            }
             #expect(field.placeholderString == SettingsSchema.describeDefault(entry),
                     "\(entry.path) doesn't show its default as its placeholder")
             #expect(!(field.placeholderString ?? "").isEmpty,
                     "\(entry.path) has no placeholder")
         }
+    }
+
+    @Test("Return inserts a newline in the summary template")
+    func multilineReturn() throws {
+        _ = NSApplication.shared
+        let window = SettingsWindow()
+        let entries = SettingsSchema.advancedSections.flatMap(\.entries)
+        let index = try #require(entries.firstIndex { $0.path == ["summary", "template"] })
+        let field = try #require(window.renderedControls[index] as? NSTextField)
+        let editor = NSTextView()
+        editor.string = "First line"
+        editor.selectedRange = NSRange(location: editor.string.utf16.count, length: 0)
+
+        #expect(window.control(field, textView: editor, doCommandBy: #selector(NSResponder.insertNewline(_:))))
+        #expect(editor.string == "First line\n")
     }
 }
 

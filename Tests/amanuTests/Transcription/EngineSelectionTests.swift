@@ -45,6 +45,20 @@ struct EngineSelectionTests {
         #expect(Self.choice("parakeet", key: true, localModels: true) == .local)
     }
 
+    @Test("Whisper is a local engine")
+    func whisperIsLocal() {
+        #expect(Self.choice("whisper", key: true, localModels: true) == .local)
+        #expect(Self.choice("whisper", key: true, localModels: false) == .cloud)
+        #expect(Self.choice("whisper", key: false, localModels: false) == .unavailable)
+    }
+
+    @Test("GigaAM is a local engine")
+    func gigaAMIsLocal() {
+        #expect(Self.choice("gigaam", key: true, localModels: true) == .local)
+        #expect(Self.choice("gigaam", key: true, localModels: false) == .cloud)
+        #expect(Self.choice("gigaam", key: false, localModels: false) == .unavailable)
+    }
+
     /// assemblyai is not overridden in either direction: it is chosen for
     /// diarization, which the local engine does not do, so a missing key is a
     /// failure to report rather than a reason to transcribe differently.
@@ -72,7 +86,7 @@ struct EngineSelectionTests {
 
     @Test("An unrecognised engine name is treated as auto")
     func unknownIsAuto() {
-        #expect(Self.choice("whisper", key: true, localModels: true) == .cloudOrLocal)
+        #expect(Self.choice("future-engine", key: true, localModels: true) == .cloudOrLocal)
         #expect(Self.choice("", key: false, localModels: true) == .local)
     }
 }

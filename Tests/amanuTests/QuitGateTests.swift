@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import Testing
 @testable import amanu
@@ -37,5 +38,21 @@ struct QuitGateTests {
         #expect(gate.decide() == .ask(elapsed: 30))
         elapsed = nil
         #expect(gate.decide() == .quitNow)
+    }
+
+    @Test("An active cleanup defers termination until it reports completion")
+    func asynchronousCleanupDefersQuit() {
+        let delegate = AppDelegate()
+        var completion: (() -> Void)?
+        delegate.onPrepareTermination = { done in
+            completion = done
+            return true
+        }
+
+        let reply = delegate.applicationShouldTerminate(NSApplication.shared)
+
+        #expect(reply == .terminateLater)
+        #expect(completion != nil)
+        withExtendedLifetime(delegate) {}
     }
 }

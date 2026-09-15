@@ -14,10 +14,12 @@ struct TranscriptionChoiceTests {
         _ engine: String,
         cloud: String = "assemblyai",
         enabled: Bool = true,
-        localModels: Bool = true
+        localModels: Bool = true,
+        localEngine: String = "parakeet"
     ) -> TranscriptionChoice {
         TranscriptionChoice.read(
-            engine: engine, cloudProvider: cloud, enabled: enabled, localModels: localModels)
+            engine: engine, cloudProvider: cloud, enabled: enabled,
+            localModels: localModels, localEngine: localEngine)
     }
 
     private static func written(_ choice: TranscriptionChoice) -> [String: String] {
@@ -72,6 +74,25 @@ struct TranscriptionChoiceTests {
             TranscriptionChoice(cloud: false, local: true, provider: "openai"))
         #expect(cloudOnly["transcription.engine"] == "openai")
         #expect(localOnly["transcription.engine"] == "parakeet")
+    }
+
+    @Test("Whisper can be the explicit local engine or auto's local fallback")
+    func whisperSelection() {
+        let explicit = Self.read("whisper")
+        #expect(explicit == TranscriptionChoice(
+            cloud: false, local: true, provider: "assemblyai", localEngine: "whisper"))
+
+        let automatic = Self.read("auto", localEngine: "whisper")
+        #expect(automatic.cloud)
+        #expect(automatic.local)
+        #expect(automatic.localEngine == "whisper")
+        let written = Self.written(automatic)
+        #expect(written["transcription.engine"] == "nil")
+        #expect(written["transcription.local_engine"] == "whisper")
+
+        let localOnly = Self.written(TranscriptionChoice(
+            cloud: false, local: true, provider: "assemblyai", localEngine: "whisper"))
+        #expect(localOnly["transcription.engine"] == "whisper")
     }
 
     /// The engine names the provider, so a config that says `openai` is read
@@ -178,7 +199,7 @@ struct TranscriptionChoiceTests {
     /// the transcription queue would not act on.
     @Test("An unknown engine reads as auto")
     func unknownIsAuto() {
-        let choice = Self.read("whisper")
+        let choice = Self.read("future-engine")
         #expect(choice.cloud)
         #expect(choice.local)
     }

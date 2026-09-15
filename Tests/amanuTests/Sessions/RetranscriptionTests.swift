@@ -511,6 +511,40 @@ struct RetranscriptionTests {
         #expect(!why.contains("--again"))
     }
 
+    @Test("A failed transcript with retained audio offers Re-transcribe in its row")
+    @MainActor
+    func aFailedRowOffersRetranscriptionBesideTheFailure() throws {
+        let dir = try Self.settledSession()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        SessionState.update(dir, with: [
+            SessionState.Key.transcriptionFailed: "assemblyai returned no speech",
+        ])
+
+        let retryable = try #require(
+            SessionInventory.item(for: dir, policy: Self.noPostProcessing))
+        #expect(RecordingsWindow.inlineRetranscribeTitle(for: retryable)
+            == localised("Re-transcribe", "Расшифровать заново"))
+
+        TrackCompressor.discard(sessionDir: dir)
+        let missingAudio = try #require(
+            SessionInventory.item(for: dir, policy: Self.noPostProcessing))
+        #expect(RecordingsWindow.inlineRetranscribeTitle(for: missingAudio) == nil)
+    }
+
+    @MainActor
+    @Test("A re-transcribe engine choice is stored with that session")
+    func retranscriptionEngineOverride() throws {
+        let dir = try Self.settledSession()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        #expect(RecordingsWindow.retranscriptionEngines.map(\.id)
+            == ["parakeet", "whisper", "gigaam", "assemblyai", "openai"])
+        RecordingsWindow.markForRetranscription(dir, engine: "whisper")
+        #expect(SessionState.value(dir, SessionState.Key.transcriptionEngine) as? String
+            == "whisper")
+        #expect(TranscriptionCoordinator.configuredEngine(for: dir) == "whisper")
+    }
+
     @Test("A recording whose audio was discarded is refused in the window too")
     @MainActor
     func theWindowRefusesDiscardedAudio() throws {

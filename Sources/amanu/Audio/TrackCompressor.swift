@@ -91,6 +91,17 @@ enum TrackCompressor {
             return
         }
 
+        // Imported media has already been normalized to compact AAC, and it
+        // deliberately has no invented mic/system sides. Re-encoding it into
+        // stereo would both lose quality and manufacture a silent channel.
+        if let source = files["source"],
+           source.lowercased().hasSuffix(".m4a"),
+           FileManager.default.fileExists(atPath: dir.appendingPathComponent(source).path) {
+            SessionState.update(dir, with: ["compressed": true])
+            log("imported audio already archived → \(source)")
+            return
+        }
+
         if files["mic"] == "audio.m4a",
            files["system"] == "audio.m4a",
            FileManager.default.fileExists(atPath: dir.appendingPathComponent("audio.m4a").path) {

@@ -49,7 +49,7 @@ enum Config {
         transcription()?["enabled"] as? Bool ?? true
     }
 
-    /// Configured engine: `auto` (default), `parakeet` (local), or a cloud
+    /// Configured engine: `auto` (default), a local engine, or a cloud
     /// provider by name — `assemblyai` or `openai`.
     ///
     /// `auto` means "the best one available right now": the cloud provider
@@ -60,6 +60,20 @@ enum Config {
     /// a train.
     static func transcriptionEngine() -> String {
         transcription()?["engine"] as? String ?? "auto"
+    }
+
+    /// Which local engine `auto` falls back to. Kept separately for the same
+    /// reason as the cloud provider: both cloud and local may be enabled, so
+    /// the single `engine` value cannot remember both choices.
+    static func transcriptionLocalEngine() -> String {
+        let configured = transcription()?["local_engine"] as? String ?? "parakeet"
+        guard localEngines.contains(configured) else {
+            FileHandle.standardError.write(Data(
+                "warning: unknown local engine \"\(configured)\" — using parakeet\n".utf8
+            ))
+            return "parakeet"
+        }
+        return configured
     }
 
     /// Which cloud engine `auto` reaches for: `assemblyai` (default) or
@@ -85,6 +99,7 @@ enum Config {
     /// The cloud engines, by the name they carry in the config and in
     /// transcript.json's provenance.
     static let cloudEngines: Set<String> = ["assemblyai", "openai"]
+    static let localEngines: Set<String> = ["parakeet", "whisper", "gigaam"]
 
     /// OpenAI's transcription model. The default is the only one of theirs
     /// that returns timings and speakers; the setting exists for the day they
@@ -444,17 +459,27 @@ enum Config {
         /// difference between tiers is a few cents per meeting, so the default
         /// is the strong one.
         var openAIModel = "gpt-5"
+        var openAIBaseURL = "https://api.openai.com/v1"
         /// Language for the summary itself; the transcript's own language is
         /// whatever was spoken. nil means "same language as the meeting".
         var language: String?
         var model = "claude-opus-5"
         var ollamaModel = "qwen3:8b"
+        var ollamaBaseURL = "http://127.0.0.1:11434"
+        var template = SummaryTemplate.default
         var apiKeyPath: URL?
     }
 
     static func summary() -> SummarySettings {
+        summary(in: load())
+    }
+
+    /// The summary settings against supplied JSON, so defaults and custom
+    /// templates are testable without reading or rewriting the person's real
+    /// config file.
+    static func summary(in root: [String: Any]?) -> SummarySettings {
         var settings = SummarySettings()
-        guard let json = load()?["summary"] as? [String: Any] else { return settings }
+        guard let json = root?["summary"] as? [String: Any] else { return settings }
 
         if let v = json["enabled"] as? Bool { settings.enabled = v }
         if let v = json["backend"] as? String, !v.isEmpty { settings.backend = v }
@@ -462,6 +487,13 @@ enum Config {
         if let v = json["model"] as? String, !v.isEmpty { settings.model = v }
         if let v = json["ollama_model"] as? String, !v.isEmpty { settings.ollamaModel = v }
         if let v = json["openai_model"] as? String, !v.isEmpty { settings.openAIModel = v }
+        if let v = json["openai_base_url"] as? String, !v.trimmed.isEmpty {
+            settings.openAIBaseURL = v.trimmed
+        }
+        if let v = json["ollama_base_url"] as? String, !v.trimmed.isEmpty {
+            settings.ollamaBaseURL = v.trimmed
+        }
+        if let v = json["template"] as? String, !v.trimmed.isEmpty { settings.template = v }
         if let v = json["api_key_path"] as? String, !v.isEmpty {
             settings.apiKeyPath = URL(fileURLWithPath: (v as NSString).expandingTildeInPath)
         }

@@ -404,7 +404,7 @@ struct AnalyticsCatalogueSettingsTests {
             switch entry.kind {
             case .toggle, .choice:
                 #expect(reportable[key] != nil, "\(key) is a toggle or a choice but not reportable")
-            case .text, .number, .list:
+            case .text, .multilineText, .number, .list:
                 #expect(reportable[key] == nil, "\(key) is free-form and must not be reportable")
             }
         }

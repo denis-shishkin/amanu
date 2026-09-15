@@ -520,6 +520,10 @@ struct InterfaceLanguageTests {
             // A view that shows what somebody said in a meeting says it in
             // the language they said it in. See `openingLabel`.
             if view.identifier?.rawValue == "meeting-words" { continue }
+            // Editable configuration values are data, not interface copy:
+            // model ids and server URLs stay byte-for-byte the same in every
+            // language, just like paths do.
+            if view.identifier?.rawValue.hasPrefix("summary.") == true { continue }
             switch view {
             case let field as NSTextField:
                 found.append(field.stringValue)
@@ -559,6 +563,7 @@ struct InterfaceLanguageTests {
             "sk-ant-…", "sk-…", "amanu",
             // The models, named the way their release notes name them.
             "parakeet v3", "parakeet v2", "NVIDIA nemotron",
+            "Parakeet", "Whisper large-v3-turbo", "GigaAM v3",
         ]
         if names.contains(text) { return true }
         // The meeting languages are named in themselves — English, Русский,
