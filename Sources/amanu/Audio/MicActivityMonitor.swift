@@ -37,16 +37,31 @@ enum MicActivityMonitor {
     /// the cost is that a browser holding the mic for anything else looks like
     /// a meeting, which the minimum-duration rule then throws away.
     static let defaultCallApps: [String] = [
+        // Meeting apps.
         "us.zoom.xos",
         "com.microsoft.teams",
         "com.microsoft.SkypeForBusiness",
         "com.skype.skype",
         "com.cisco.webexmeetingsapp",
         "com.webex.meetingmanager",
+        "Cisco-Systems.Spark",
         "com.tinyspeck.slackmacgap",
+
+        // Messengers with calls. Telegram has separate App Store and direct-
+        // download clients, with unrelated bundle ids.
         "ru.keepcoder.Telegram",
+        "com.tdesktop.Telegram",
+        "net.whatsapp.WhatsApp",
+        "org.whispersystems.signal-desktop",
+        "com.viber.osx",
+        "jp.naver.line.mac",
+        "com.tencent.xinWeChat",
         "com.apple.FaceTime",
         "com.hnc.Discord",
+
+        // Browsers. Web meeting apps and installed PWAs inherit one of these
+        // families, so Meet, Whereby, Teams, Zoom and similar calls in a tab
+        // need no service-specific entry.
         "com.google.Chrome",
         "com.google.Chrome.helper",
         "org.mozilla.firefox",
@@ -55,6 +70,14 @@ enum MicActivityMonitor {
         "company.thebrowser.Browser",
         "com.brave.Browser",
         "com.microsoft.edgemac",
+        "com.operasoftware.Opera",
+        "com.vivaldi.Vivaldi",
+        "org.chromium.Chromium",
+        "ru.yandex.desktop.yandex-browser",
+        "com.duckduckgo.macos.browser",
+        "com.kagi.kagimacOS",
+        "app.zen-browser.zen",
+        "company.thebrowser.dia",
     ]
 
     struct Result {

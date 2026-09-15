@@ -33,6 +33,35 @@ struct CallAppDetectionTests {
         #expect(result.families == ["us.zoom.xos"])
     }
 
+    /// These are defaults rather than setup advice: without their bundle-id
+    /// family, a call in one of these apps or browsers never starts a recording.
+    @Test("Popular call apps and browsers start automatic recording", arguments: [
+        "net.whatsapp.WhatsApp",
+        "org.whispersystems.signal-desktop",
+        "com.microsoft.teams2",
+        "com.tdesktop.Telegram",
+        "Cisco-Systems.Spark",
+        "com.viber.osx",
+        "jp.naver.line.mac",
+        "com.tencent.xinWeChat",
+        "com.operasoftware.Opera",
+        "com.vivaldi.Vivaldi",
+        "org.chromium.Chromium",
+        "ru.yandex.desktop.yandex-browser",
+        "com.duckduckgo.macos.browser",
+        "com.kagi.kagimacOS",
+        "app.zen-browser.zen",
+        "company.thebrowser.dia",
+    ])
+    func popularCallAppsAndBrowsersCount(bundleID: String) {
+        let result = MicActivityMonitor.evaluate(
+            processes: [process(bundleID, name: "Call", input: true)],
+            callApps: MicActivityMonitor.defaultCallApps)
+
+        #expect(result.active)
+        #expect(!result.families.isEmpty)
+    }
+
     /// The process that opens the mic is usually a helper, and the tap has to
     /// follow the whole app: point it at one renderer and a reloaded tab takes
     /// the far end with it.
