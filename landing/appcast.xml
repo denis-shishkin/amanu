@@ -6,33 +6,25 @@
         <description>Updates for amanu, a local-first meeting recorder for macOS.</description>
         <language>en</language>
         <item>
-            <title>0.4.20</title>
-            <pubDate>Tue, 15 Sep 2026 19:00:38 +0000</pubDate>
+            <title>0.4.21</title>
+            <pubDate>Tue, 15 Sep 2026 19:26:16 +0000</pubDate>
             <sparkle:minimumSystemVersion>14.2</sparkle:minimumSystemVersion>
-            <description><![CDATA[<h2>Amanu 0.4.20</h2>
-<h3>A readable Dock icon</h3>
+            <description><![CDATA[<h2>Amanu 0.4.21</h2>
+<h3>The right interface language</h3>
 <ul>
-<li>The Dock icon now keeps its recognizable slate background in every recording state instead of turning into a bare dark feather that disappears against a dark Dock.</li>
-<li>Recording status stays where macOS expects it: the system Dock badge shows elapsed time, while the menu bar feather remains red during recording and orange while paused.</li>
-<li>On macOS 26 and later, Amanu includes layered Default, Dark and tinted icon appearances. Sonoma and Sequoia keep the existing hand-tuned icon.</li>
-</ul>
-<h3>Sonoma compatibility</h3>
-<ul>
-<li>Lowered the minimum system requirement from macOS 15 to macOS 14.2, including the main executable and the bundled echo-suppression library.</li>
-<li>Added a release check that inspects every embedded Mach-O slice and nested bundle, preventing dependencies from silently raising the minimum macOS version again.</li>
-<li>macOS 14.2 is the oldest system with the Core Audio process-tap API Amanu needs to record the other side of a meeting. Automatic per-process detection is limited before macOS 14.4; recordings can still be started manually.</li>
+<li>Amanu now follows the Mac&#x27;s primary interface language. A Mac set to Russian opens Amanu in Russian; every other language falls back to English instead of picking Russian from farther down the preferred-language list.</li>
+<li>An explicitly selected English or Russian interface still overrides the Mac and takes effect after Amanu restarts.</li>
 </ul>
 <h3>Compatibility</h3>
 <ul>
-<li>Universal binary for Apple Silicon and Intel. Local transcription requires Apple Silicon; Intel requires a cloud transcription key and has not been tested on physical hardware.</li>
-<li>The macOS 14.2 deployment target is verified by compilation and release-artifact inspection. Runtime testing on physical macOS 14 hardware is still pending.</li>
+<li>Universal binary for Apple Silicon and Intel Macs running macOS 14.2 or later. Local transcription requires Apple Silicon; Intel requires a cloud transcription key and has not been tested on physical hardware.</li>
 </ul>]]></description>
             <enclosure
-                url="https://github.com/gsamat/amanu/releases/download/v0.4.20/amanu-v0.4.20-macos-universal.dmg"
-                sparkle:version="292"
-                sparkle:shortVersionString="0.4.20"
-                sparkle:edSignature="3F+D5Hwv03VshJUPwSANfGQo7dgh/oyaGDSiTPiiWF19BDdwhD8/FqRK10OR30ol1bFqZb9mXwgS9+TmZpHuCA=="
-                length="15745674"
+                url="https://github.com/gsamat/amanu/releases/download/v0.4.21/amanu-v0.4.21-macos-universal.dmg"
+                sparkle:version="294"
+                sparkle:shortVersionString="0.4.21"
+                sparkle:edSignature="pUfnMPT71N2UnnOR8QyCJvJqUc13jEMk7vDpuDubGwLFtnW3XAc/CmoWjR1AVRXo45Qh4hY/Kdlq6d2jhRnIDw=="
+                length="15755559"
                 type="application/octet-stream" />
         </item>
     </channel>
