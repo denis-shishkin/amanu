@@ -6,25 +6,27 @@
         <description>Updates for amanu, a local-first meeting recorder for macOS.</description>
         <language>en</language>
         <item>
-            <title>0.4.24</title>
-            <pubDate>Tue, 15 Sep 2026 21:47:36 +0000</pubDate>
+            <title>0.4.25</title>
+            <pubDate>Tue, 15 Sep 2026 22:11:26 +0000</pubDate>
             <sparkle:minimumSystemVersion>14.2</sparkle:minimumSystemVersion>
-            <description><![CDATA[<h2>Amanu 0.4.24</h2>
-<h3>Homebrew installation</h3>
+            <description><![CDATA[<h2>Amanu 0.4.25</h2>
+<h3>Local transcription models</h3>
 <ul>
-<li>Amanu can be installed with <code>brew install --cask gsamat/tap/amanu</code>.</li>
-<li>A Homebrew-managed <code>amanu</code> command now takes precedence over Amanu&#x27;s private <code>~/.local/bin/amanu</code> link, avoiding a duplicate command after installation.</li>
+<li>Local transcription models are once again shown as separate cards, making the choice between Parakeet, Whisper, and GigaAM clear at a glance.</li>
+<li>Every card shows the expected download size before installation and the actual disk usage afterwards.</li>
+<li>Download progress and failures now stay attached to the model they belong to.</li>
+<li>GigaAM is described as an alternative for Russian rather than the default recommendation.</li>
 </ul>
 <h3>Compatibility</h3>
 <ul>
 <li>Universal binary for Apple Silicon and Intel Macs running macOS 14.2 or later. Local transcription requires Apple Silicon; Intel requires a cloud transcription key and has not been tested on physical hardware.</li>
 </ul>]]></description>
             <enclosure
-                url="https://github.com/gsamat/amanu/releases/download/v0.4.24/amanu-v0.4.24-macos-universal.dmg"
-                sparkle:version="301"
-                sparkle:shortVersionString="0.4.24"
-                sparkle:edSignature="tRpUwj7sNduemG8jjAyj3jYH2DKe5So/A89KtYIwA/Ncqy1kY6MAvAEoQVI8vWURh4WBvFsMZlbHixUxYUGvBA=="
-                length="23327947"
+                url="https://github.com/gsamat/amanu/releases/download/v0.4.25/amanu-v0.4.25-macos-universal.dmg"
+                sparkle:version="304"
+                sparkle:shortVersionString="0.4.25"
+                sparkle:edSignature="eKC9BsjAP1kyoZP9Wlj0yC2mxuYypOg9Mk6C/3aZv4vEDpJ0riqtTnx2JK0JxeMcbCB/JlmhJN0fx22JxdumDA=="
+                length="23322458"
                 type="application/octet-stream" />
         </item>
     </channel>
