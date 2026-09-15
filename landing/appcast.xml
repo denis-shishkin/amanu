@@ -6,26 +6,34 @@
         <description>Updates for amanu, a local-first meeting recorder for macOS.</description>
         <language>en</language>
         <item>
-            <title>0.4.17</title>
-            <pubDate>Tue, 15 Sep 2026 05:41:48 +0000</pubDate>
+            <title>0.4.18</title>
+            <pubDate>Tue, 15 Sep 2026 08:11:09 +0000</pubDate>
             <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
-            <description><![CDATA[<h2>Amanu 0.4.17</h2>
-<p>This release removes acoustic echo after a meeting without changing the live call or the saved recording.</p>
-<h3>What changed</h3>
+            <description><![CDATA[<h2>Amanu 0.4.18</h2>
+<h3>Analytics delivery</h3>
 <ul>
-<li>Amanu now cleans a temporary microphone copy with LocalVQE before transcription. The original microphone and system tracks remain untouched, so disputed passages can still be checked against the source recording. Processing never opens an output device, changes playback volume or reduces what you hear during the call.</li>
-<li>The model removes playback captured by the microphone without applying noise gating, denoising or automatic gain control. It continues cancellation for one second after playback stops to cover a delayed acoustic tail. During sustained reference silence, Amanu uses the original microphone samples exactly. Large or abrupt changes in playback delay can still leave some echo.</li>
-<li>A controlled prototype evaluation covered nine complete recordings. Matched duplicate words remaining after filtering fell from 340 to 16 with AssemblyAI and from 532 to 39 with Parakeet. Source hashes, durations and the system track remained unchanged in all nine runs. Some quiet words still changed or disappeared, so these results do not imply perfect transcription.</li>
-<li>Three complete recordings also passed through the actual application paths. Matched duplicate words fell from 154 to 17 with AssemblyAI and from 194 to 33 with Parakeet. Original-file hashes and decoded track lengths matched. These results cover the production decoder and codecs and are separate from the nine-recording prototype figures above.</li>
-<li>Provider utterances entirely beyond the real audio duration are now discarded, while a genuine utterance crossing the boundary is clipped. Cleaned audio uses a processor-specific cache and is removed after transcription. Processing failures leave the source recording intact.</li>
+<li>Fixed analytics events being rejected because their timestamps included fractional seconds. Existing queued events are converted automatically.</li>
+<li>Events are now removed from the local queue only after validating the server&#x27;s acknowledgement. Failed entries remain queued, and successful entries in a partially accepted batch are not resent.</li>
+<li>Large backlogs are split into requests within the server&#x27;s limit. The existing opt-out, seven-day retention and 500-event queue limit remain in effect.</li>
+<li>Events already discarded by earlier versions cannot be recovered. Statistics begin accumulating as updated installations send events.</li>
 </ul>
-<p>The bundled LocalVQE model and universal library are pinned, SHA-verified and signed inside the application. The library supports Apple Silicon and Intel. Local Parakeet transcription still requires Apple Silicon; Intel uses a cloud provider. Physical Intel hardware and macOS 15 have not been tested.</p>]]></description>
+<h3>Automatic recording</h3>
+<ul>
+<li>Expanded default call detection to WhatsApp, Signal, Telegram Desktop, Viber, LINE, WeChat and current Webex.</li>
+<li>Added Opera, Vivaldi, Chromium, Yandex Browser, DuckDuckGo, Orion, Zen and Dia for calls in browser tabs. Existing custom application lists remain unchanged.</li>
+</ul>
+<h3>Compatibility</h3>
+<ul>
+<li>Release packaging now discovers SwiftPM&#x27;s output directory, including the new Xcode 27 build engine.</li>
+<li>Universal binary for Apple Silicon and Intel Macs running macOS 15 or later. Intel requires a cloud transcription key and has not been tested on physical hardware.</li>
+<li>Audio capture and echo-suppression behavior are unchanged in this release.</li>
+</ul>]]></description>
             <enclosure
-                url="https://github.com/gsamat/amanu/releases/download/v0.4.17/amanu-v0.4.17-macos-universal.dmg"
-                sparkle:version="278"
-                sparkle:shortVersionString="0.4.17"
-                sparkle:edSignature="J6fiN6G2M+Dktvh2MESEwZOSLFiZgg7bNI97osS5pkgyPrYz9mLaQkR/Dp7ohtjBrMzDo6Bjf8wt6yhbDW3bCA=="
-                length="13740885"
+                url="https://github.com/gsamat/amanu/releases/download/v0.4.18/amanu-v0.4.18-macos-universal.dmg"
+                sparkle:version="286"
+                sparkle:shortVersionString="0.4.18"
+                sparkle:edSignature="jEG5T0NRb4Yx8caohhyRR5HlkOUqwBmIZie918iCBcK0SgHHqRkA8gvSJrY4JZjWm8mQ7g4JOKfIzH0ByKnjBg=="
+                length="14045158"
                 type="application/octet-stream" />
         </item>
     </channel>
