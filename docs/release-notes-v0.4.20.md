@@ -1,5 +1,11 @@
 # Amanu 0.4.20
 
+## A readable Dock icon
+
+- The Dock icon now keeps its recognizable slate background in every recording state instead of turning into a bare dark feather that disappears against a dark Dock.
+- Recording status stays where macOS expects it: the system Dock badge shows elapsed time, while the menu bar feather remains red during recording and orange while paused.
+- On macOS 26 and later, Amanu includes layered Default, Dark and tinted icon appearances. Sonoma and Sequoia keep the existing hand-tuned icon.
+
 ## Sonoma compatibility
 
 - Lowered the minimum system requirement from macOS 15 to macOS 14.2, including the main executable and the bundled echo-suppression library.

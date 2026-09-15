@@ -1,0 +1,28 @@
+{
+  "fill" : {
+    "automatic-gradient" : "extended-srgb:0.29412,0.35294,0.43529,1.00000"
+  },
+  "groups" : [
+    {
+      "layers" : [
+        {
+          "image-name" : "Amanu-feather.svg",
+          "name" : "Amanu feather"
+        }
+      ],
+      "shadow" : {
+        "kind" : "neutral",
+        "opacity" : 0.3
+      },
+      "translucency" : {
+        "enabled" : false,
+        "value" : 0
+      }
+    }
+  ],
+  "supported-platforms" : {
+    "squares" : [
+      "macOS"
+    ]
+  }
+}

@@ -35,6 +35,8 @@ MINIMUM_MACOS ?= 14.2
 # A build number that only ever goes up, and says which commit it was.
 BUILD     ?= $(shell git rev-list --count HEAD 2>/dev/null || echo 1)
 ICON       = Resources/Amanu.icns
+ADAPTIVE_ICON = Resources/Amanu.icon
+BUILT_ICON = .build/app-icon
 DIST       = dist
 DMG        = $(DIST)/amanu-v$(VERSION)-macos-universal.dmg
 
@@ -89,6 +91,7 @@ $(ICON):
 app: build $(ICON)
 	@rm -rf $(APP)
 	@mkdir -p $(APP)/Contents/MacOS $(APP)/Contents/Resources/Models $(APP)/Contents/Frameworks
+	@scripts/build-app-icon.sh $(ADAPTIVE_ICON) $(ICON) $(BUILT_ICON) $(MINIMUM_MACOS)
 	@cp $(BUILT) $(APP)/Contents/MacOS/$(APP_NAME)
 	@cp $(LOCALVQE_LIB) $(APP)/Contents/Frameworks/liblocalvqe.dylib
 	@cp $(LOCALVQE_MODEL) $(APP)/Contents/Resources/Models/
@@ -96,7 +99,8 @@ app: build $(ICON)
 	@sed -e 's/__SHORT_VERSION__/$(VERSION)/' -e 's/__BUILD_VERSION__/$(BUILD)/' \
 		Packaging/Amanu-Info.plist > $(APP)/Contents/Info.plist
 	@printf 'APPL????' > $(APP)/Contents/PkgInfo
-	@cp $(ICON) $(APP)/Contents/Resources/Amanu.icns
+	@cp $(BUILT_ICON)/Amanu.icns $(APP)/Contents/Resources/Amanu.icns
+	@cp $(BUILT_ICON)/Assets.car $(APP)/Contents/Resources/Assets.car
 	@mkdir -p $(APP)/Contents/Resources/Licenses
 	@cp LICENSE $(APP)/Contents/Resources/LICENSE
 	@cp THIRD-PARTY-NOTICES.md $(APP)/Contents/Resources/
@@ -115,6 +119,8 @@ app: build $(ICON)
 	@cp .build/checkouts/Sparkle/Vendor/ed25519-sparkle/license.txt \
 		$(APP)/Contents/Resources/Licenses/Sparkle-ed25519-LICENSE.txt
 	@test -s $(APP)/Contents/Resources/LICENSE \
+		&& test -s $(APP)/Contents/Resources/Amanu.icns \
+		&& test -s $(APP)/Contents/Resources/Assets.car \
 		&& test -s $(APP)/Contents/Resources/THIRD-PARTY-NOTICES.md \
 		&& test -s $(APP)/Contents/Resources/Models/localvqe-v1.4-aec-200K-f32.gguf \
 		&& test -s $(APP)/Contents/Resources/LocalVQE-verification.json \

@@ -44,7 +44,7 @@ struct Run: ParsableCommand {
         InterfaceLanguage.adoptFromSystem()
         let app = NSApplication.shared
         app.setActivationPolicy(Config.dockIcon() ? .regular : .accessory)
-        app.applicationIconImage = FeatherIcon.image(size: 512, color: nil)
+        DockPresentation.update(state: .idle, elapsed: nil, application: app)
         if ApplicationRelocation.offerMoveIfNeeded() { return }
 
         // A copy started from a shell is not its own responsible process, so
@@ -915,12 +915,7 @@ final class AppController {
     private func present(_ state: MenuBarController.State, elapsed: String?) {
         menuBar.update(state: state, elapsed: elapsed)
         window.update(state: state, elapsed: elapsed)
-        // The Dock tile is the one indicator nothing can hide or crowd out.
-        NSApp.applicationIconImage = FeatherIcon.image(
-            size: 512,
-            color: FeatherIcon.color(recording: state != .idle, paused: state == .paused)
-        )
-        NSApp.dockTile.badgeLabel = state == .idle ? nil : elapsed
+        DockPresentation.update(state: state, elapsed: elapsed)
     }
 
     private func tick() {
@@ -961,5 +956,19 @@ final class AppController {
         return h > 0
             ? String(format: "%d:%02d:%02d", h, m, s)
             : String(format: "%d:%02d", m, s)
+    }
+}
+
+/// Keeps the application icon as stable identity while the system-defined Dock
+/// badge carries transient recording state. Appearance variants belong to the
+/// app icon asset and follow the person's macOS appearance, not the recorder.
+@MainActor
+enum DockPresentation {
+    static func update(
+        state: MenuBarController.State,
+        elapsed: String?,
+        application: NSApplication = .shared
+    ) {
+        application.dockTile.badgeLabel = state == .idle ? nil : elapsed
     }
 }
