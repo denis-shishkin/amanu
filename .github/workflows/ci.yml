@@ -22,7 +22,10 @@ jobs:
       - name: Build and verify LocalVQE assets
         run: make verify-localvqe
       - name: Swift tests
-        run: swift test
+        # The native echo test occupies CPU workers for tens of seconds.
+        # Keep unrelated suites from starving bounded async transport tests;
+        # concurrency exercised inside each test remains unchanged.
+        run: swift test --no-parallel
       - name: Universal release build
         run: make build
       - name: Landing checks
