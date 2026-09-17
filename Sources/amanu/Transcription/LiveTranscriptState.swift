@@ -175,7 +175,13 @@ struct LiveTranscriptState: Sendable {
 /// appears again on the next snapshot instead of being lost.
 enum LiveEchoFilter {
     private static let maximumStartDelta = 4_000
+    /// Nemotron may cut the clean system stream at pauses that the echoed mic
+    /// stream does not hear as silence. Compare a bounded minute around an
+    /// anchored match: enough for one long spoken block, without making every
+    /// live refresh compare against an ever-growing meeting transcript.
+    private static let maximumCombinedStartDelta = 60_000
     private static let minimumWords = 5
+    private static let minimumAnchorWords = 3
     private static let minimumCoverage = 0.90
 
     static func visibleEntries(
@@ -191,7 +197,7 @@ enum LiveEchoFilter {
             }
             visible.append(contentsOf: epoch.filter { entry in
                 guard case .speech(let block) = entry, block.speaker == .you else { return true }
-                return !remote.contains { isEcho(block, of: $0) }
+                return !isEcho(block, of: remote)
             })
             epoch.removeAll(keepingCapacity: true)
         }
@@ -210,23 +216,42 @@ enum LiveEchoFilter {
 
     private static func isEcho(
         _ microphone: LiveTranscriptState.Block,
-        of system: LiveTranscriptState.Block
+        of system: [LiveTranscriptState.Block]
     ) -> Bool {
-        guard abs(microphone.startMilliseconds - system.startMilliseconds) <= maximumStartDelta
-        else { return false }
         let heard = words(microphone.text)
         guard heard.count >= minimumWords else { return false }
-        let played = words(system.text)
-        guard !played.isEmpty else { return false }
-        return Double(longestCommonSubsequence(heard, played)) / Double(heard.count)
-            >= minimumCoverage
+
+        let anchors = system.filter { block in
+            let timely = abs(microphone.startMilliseconds - block.startMilliseconds)
+                <= maximumStartDelta
+            let bothActive = microphone.isProvisional && block.isProvisional
+            guard timely || bothActive else { return false }
+            return longestCommonSubsequence(heard, words(block.text)) >= minimumAnchorWords
+        }
+        let heardCharacters = Array(heard.joined())
+
+        return anchors.contains { anchor in
+            let played = system.filter {
+                abs($0.startMilliseconds - anchor.startMilliseconds)
+                    <= maximumCombinedStartDelta
+            }.flatMap { words($0.text) }
+            let wordCoverage = Double(longestCommonSubsequence(heard, played))
+                / Double(heard.count)
+            let playedCharacters = Array(played.joined())
+            let characterCoverage = Double(longestCommonSubsequence(
+                heardCharacters, playedCharacters
+            )) / Double(heardCharacters.count)
+            return max(wordCoverage, characterCoverage) >= minimumCoverage
+        }
     }
 
     private static func words(_ text: String) -> [String] {
         text.lowercased().split { !$0.isLetter && !$0.isNumber }.map(String.init)
     }
 
-    private static func longestCommonSubsequence(_ lhs: [String], _ rhs: [String]) -> Int {
+    private static func longestCommonSubsequence<Element: Equatable>(
+        _ lhs: [Element], _ rhs: [Element]
+    ) -> Int {
         guard !lhs.isEmpty, !rhs.isEmpty else { return 0 }
         var previous = Array(repeating: 0, count: rhs.count + 1)
         for left in lhs {

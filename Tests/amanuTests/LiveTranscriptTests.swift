@@ -75,6 +75,51 @@ struct LiveTranscriptTests {
         #expect(LiveEchoFilter.visibleEntries([them, you]) == [them])
     }
 
+    @Test("One microphone echo is hidden when the system transcript split it into blocks")
+    func liveEchoAcrossSystemBlocksIsHidden() {
+        let first = LiveTranscriptState.Entry.speech(.init(
+            speaker: .them,
+            text: "и это круто может быть мы могли бы как то тех парттайм",
+            startMilliseconds: 1_200,
+            isProvisional: false))
+        let second = LiveTranscriptState.Entry.speech(.init(
+            speaker: .them,
+            text: "разработчиков которые мы можем подключать как усиление андрея",
+            startMilliseconds: 5_000,
+            isProvisional: false))
+        let third = LiveTranscriptState.Entry.speech(.init(
+            speaker: .them,
+            text: "делать а не как основные разработчики",
+            startMilliseconds: 8_000,
+            isProvisional: false))
+        let you = LiveTranscriptState.Entry.speech(.init(
+            speaker: .you,
+            text: "и это круто может быть мы могли бы как то тех парттайм "
+                + "разработчиков которые мы можем подключать как усиление андрея "
+                + "делать а не как основные разработчики",
+            startMilliseconds: 1_000,
+            isProvisional: false))
+
+        #expect(LiveEchoFilter.visibleEntries([you, first, second, third])
+            == [first, second, third])
+    }
+
+    @Test("Matching active blocks ignore decoder callback lag")
+    func activeLiveEchoIsHiddenDespiteCallbackLag() {
+        let them = LiveTranscriptState.Entry.speech(.init(
+            speaker: .them,
+            text: "в виду ограничения по бюджету с одной стороны вот с другой стороны",
+            startMilliseconds: 10_000,
+            isProvisional: true))
+        let you = LiveTranscriptState.Entry.speech(.init(
+            speaker: .you,
+            text: "ввиду ограничения по бюджету с одной стороны вот с другой стороны мы",
+            startMilliseconds: 19_000,
+            isProvisional: true))
+
+        #expect(LiveEchoFilter.visibleEntries([them, you]) == [them])
+    }
+
     @Test("Short replies and delayed repetition remain visible")
     func genuineShortAndDelayedSpeechRemainVisible() {
         let them = LiveTranscriptState.Entry.speech(.init(

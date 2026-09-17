@@ -49,6 +49,7 @@ enum MicActivityMonitor {
         "ru.yandex.desktop.telemost",
         "ru.unlimitedtech.express.desktop",
         "kontur.talk",
+        "vc.dion.desktop",
 
         // Messengers with calls. Telegram has separate App Store and direct-
         // download clients, with unrelated bundle ids.

@@ -47,6 +47,22 @@ struct SpeakerAttributionTests {
         }
     }
 
+    /// A 16 kHz PCM track shaped exactly like OfflineEchoAudio's output.
+    private static func writeEchoCancelledTrack(to url: URL, seconds: Double) throws {
+        let rate = 16_000.0
+        let format = AVAudioFormat(standardFormatWithSampleRate: rate, channels: 1)!
+        let file = try AVAudioFile(
+            forWriting: url, settings: AudioFormats.pcmSettings(sampleRate: rate, channels: 1))
+        let frames = AVAudioFrameCount(seconds * rate)
+        let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frames)!
+        buffer.frameLength = frames
+        let data = buffer.floatChannelData![0]
+        for i in 0..<Int(frames) {
+            data[i] = 0.1 * Float(sin(2 * .pi * 220 * Double(i) / rate))
+        }
+        try file.write(from: buffer)
+    }
+
     /// mic speaks 0–2s and 6–8s; system speaks 2.5–4.5s in its own timeline
     /// and starts 0.5s late, so on the shared clock it lands at 3.0–5.0s.
     /// Gains differ ~9x on purpose — two real tracks never match levels.
@@ -252,6 +268,28 @@ struct SpeakerAttributionTests {
         let duration = try await AVURLAsset(url: mixed).load(.duration).seconds
         // 10s of track laid in at +0.5s.
         #expect(duration > 10.3 && duration < 11.0, "expected ~10.5s, got \(duration)")
+    }
+
+    @Test("The PCM tracks made by echo cancellation can be mixed at 16 kHz")
+    func mixAcceptsEchoCancelledTracks() async throws {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("amanu-aec-mix-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let mic = dir.appendingPathComponent("mic.caf")
+        let system = dir.appendingPathComponent("system.caf")
+        try Self.writeEchoCancelledTrack(to: mic, seconds: 1)
+        try Self.writeEchoCancelledTrack(to: system, seconds: 1)
+
+        let mixed = dir.appendingPathComponent("mixed.m4a")
+        try await AudioMixer.mix(
+            [AudioMixer.Track(url: mic, offset: 0), AudioMixer.Track(url: system, offset: 0)],
+            to: mixed)
+
+        let file = try AVAudioFile(forReading: mixed)
+        #expect(file.fileFormat.sampleRate == 16_000)
+        #expect(file.length > 0)
     }
 
     /// A leftover mix from a failed run used to wedge every retry, since

@@ -55,6 +55,7 @@ struct CallAppDetectionTests {
         "ru.yandex.desktop.telemost",
         "ru.unlimitedtech.express.desktop",
         "kontur.talk",
+        "vc.dion.desktop",
     ])
     func popularCallAppsAndBrowsersCount(bundleID: String) {
         let result = MicActivityMonitor.evaluate(
